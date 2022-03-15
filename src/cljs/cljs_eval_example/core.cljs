@@ -1,4 +1,5 @@
 (ns cljs-eval-example.core
+  (:require-macros [cljs-eval-example.core :refer [analyzer-state]])
   (:require
    [reagent.dom :as dom]
    [reagent.core :as reagent :refer [atom]]
@@ -42,15 +43,10 @@
 
 (def output (atom [:div "loading..."]))
 
-(defn edit! [var f & args]
-  (let [state @(:state @output)
-        old-value (var->value var)
-        new-value (apply f old-value args)]
-    (.setValue @cm (replace-var state var (.getValue @cm) new-value))))
-
 (defn run []
   (let [input (.getValue @cm)
         state (empty-state)]
+    (cljs.js/load-analysis-cache! state 'clojure.string (analyzer-state 'clojure.string))
     (eval-str
      state
      "(def edit! js/cljs_eval_example.core.edit_BANG_)"
@@ -71,6 +67,13 @@
                                         :code (read-string input)
                                         :state state}))))))))
 
+(defn edit! [var f & args]
+  (let [state @(:state @output)
+        old-value (var->value var)
+        new-value (apply f old-value args)]
+    (.setValue @cm (replace-var state var (.getValue @cm) new-value))
+    (run)))
+    
 (defn editor []
   (reagent/create-class
    {:render (fn [] [:textarea
@@ -86,7 +89,7 @@
                            (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
-  [:div (:value @output)])
+  [:div (or (:value @output) (pr-str (:error @output)))])
 
 (defn home-page []
   [:div
