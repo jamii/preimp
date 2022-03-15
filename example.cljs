@@ -1,10 +1,10 @@
-(defonce todos (sorted-map))
+(def todos (sorted-map))
 
-(defonce next-id 0)
+(def next-id 0)
 
 (def input-value {})
 
-(def editing {})
+(def editing #{})
 
 (def filt :all)
 
@@ -65,16 +65,17 @@
 (defn todo-item []
   (fn [{:keys [id done title]}]
     [:li {:class (str (if done "completed ")
-                      (if (get editing id) "editing"))}
+                      (if (contains? editing id) "editing"))}
      [:div.view
       [:input.toggle {:type "checkbox" :checked done
                       :on-change #(toggle id)}]
-      [:label {:on-double-click #(edit! 'editing assoc id true)} title]
+      [:label {:on-double-click #(edit! 'editing conj id)} title]
       [:button.destroy {:on-click #(delete id)}]]
-     (when (get editing id)
-       [todo-edit {:class "edit" :title title
+     (when (contains? editing id)
+       [todo-edit {:id id
+                   :class "edit" :title title
                    :on-save #(save id %)
-                   :on-stop #(edit! 'editing dissoc id)}])]))
+                   :on-stop #(edit! 'editing disj id)}])]))
 
 (def app
   (let [items (vals todos)
