@@ -7,7 +7,7 @@
 
 (def cm (atom nil))
 
-(def output (atom nil))
+(def output (atom [:div "loading..."]))
 
 (defn run []
   (eval-str
@@ -18,7 +18,7 @@
       :source-map true
       :context    :statement}
      (fn [result]
-       (reset! output result))))
+       (reset! output (:value result)))))
 
 (defn editor []
   (reagent/create-class
@@ -34,10 +34,11 @@
                    :extraKeys #js {
                      "Ctrl-Enter" run
                    }
-                 })))}))
+                 }))
+      (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
-  [:pre>code.clj (pr-str @output)])
+  [:div @output])
 
 (defn home-page []
       [:div
