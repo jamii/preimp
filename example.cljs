@@ -3,7 +3,7 @@
 (defonce next-id 0)
 
 (def input-value {})
-        
+
 (def editing {})
 
 (def filt :all)
@@ -17,9 +17,14 @@
 (defn save [id title] (edit! 'todos assoc-in [id :title] title))
 (defn delete [id] (edit! 'todos dissoc id))
 
-(defn mmap [m f a] (->> m (f a) (into (empty m))))
-(defn complete-all [v] (edit! 'todos mmap map #(assoc-in % [1 :done] v)))
-(defn clear-done [] (edit! 'todos mmap remove #(get-in % [1 :done])))
+(defn complete-all [b]
+  (doseq [id (keys todos)]
+    (edit! 'todos assoc-in [id :done] b)))
+
+(defn clear-done []
+  (doseq [id (keys todos)]
+    (when (get-in todos [id :done])
+      (delete id))))
 
 (defn todo-input [{:keys [id title on-save on-stop]}]
   (let [value (get input-value id "")
@@ -58,43 +63,43 @@
         "Clear completed " done])]))
 
 (defn todo-item []
-    (fn [{:keys [id done title]}]
-      [:li {:class (str (if done "completed ")
-                        (if (get editing id) "editing"))}
-       [:div.view
-        [:input.toggle {:type "checkbox" :checked done
-                        :on-change #(toggle id)}]
-        [:label {:on-double-click #(edit! 'editing assoc id true)} title]
-        [:button.destroy {:on-click #(delete id)}]]
-       (when (get editing id)
-         [todo-edit {:class "edit" :title title
-                     :on-save #(save id %)
-                     :on-stop #(edit! 'editing dissoc id)}])])) 
-                     
-(def app 
-      (let [items (vals todos)
-            done (->> items (filter :done) count)
-            active (- (count items) done)]
+  (fn [{:keys [id done title]}]
+    [:li {:class (str (if done "completed ")
+                      (if (get editing id) "editing"))}
+     [:div.view
+      [:input.toggle {:type "checkbox" :checked done
+                      :on-change #(toggle id)}]
+      [:label {:on-double-click #(edit! 'editing assoc id true)} title]
+      [:button.destroy {:on-click #(delete id)}]]
+     (when (get editing id)
+       [todo-edit {:class "edit" :title title
+                   :on-save #(save id %)
+                   :on-stop #(edit! 'editing dissoc id)}])]))
+
+(def app
+  (let [items (vals todos)
+        done (->> items (filter :done) count)
+        active (- (count items) done)]
+    [:div
+     [:section#todoapp
+      [:header#header
+       [:h1 "todos"]
+       [todo-input {:id "new-todo"
+                    :placeholder "What needs to be done?"
+                    :on-save add-todo}]]
+      (when (-> items count pos?)
         [:div
-         [:section#todoapp
-          [:header#header
-           [:h1 "todos"]
-           [todo-input {:id "new-todo"
-                        :placeholder "What needs to be done?"
-                        :on-save add-todo}]]
-          (when (-> items count pos?)
-            [:div
-             [:section#main
-              [:input#toggle-all {:type "checkbox" :checked (zero? active)
-                                  :on-change #(complete-all (pos? active))}]
-              [:label {:for "toggle-all"} "Mark all as complete"]
-              [:ul#todo-list
-               (for [todo (filter (case filt
-                                    :active (complement :done)
-                                    :done :done
-                                    :all identity) items)]
-                 ^{:key (:id todo)} [todo-item todo])]]
-             [:footer#footer
-              [todo-stats {:active active :done done :filt filt}]]])]
-         [:footer#info
-          [:p "Double-click to edit a todo"]]]))
+         [:section#main
+          [:input#toggle-all {:type "checkbox" :checked (zero? active)
+                              :on-change #(complete-all (pos? active))}]
+          [:label {:for "toggle-all"} "Mark all as complete"]
+          [:ul#todo-list
+           (for [todo (filter (case filt
+                                :active (complement :done)
+                                :done :done
+                                :all identity) items)]
+             ^{:key (:id todo)} [todo-item todo])]]
+         [:footer#footer
+          [todo-stats {:active active :done done :filt filt}]]])]
+     [:footer#info
+      [:p "Double-click to edit a todo"]]]))

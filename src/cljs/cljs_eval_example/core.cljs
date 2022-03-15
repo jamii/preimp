@@ -73,7 +73,7 @@
         new-value (apply f old-value args)]
     (.setValue @cm (replace-var state var (.getValue @cm) new-value))
     (run)))
-    
+
 (defn editor []
   (reagent/create-class
    {:render (fn [] [:textarea
