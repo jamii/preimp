@@ -5,54 +5,50 @@
    [cljs.js :refer [empty-state eval-str js-eval]]
    [cljs.pprint :refer [pprint]]))
 
-(defn evaluate [s cb]
+(def cm (atom nil))
+
+(def output (atom nil))
+
+(defn run []
   (eval-str
      (empty-state)
-     s
+     (.getValue @cm)
      nil
      {:eval       js-eval    
       :source-map true
       :context    :statement}
-     cb))
-    
-(def input (atom nil))
-(def output (atom nil))
-(defn run [] (evaluate @input (fn [result] (reset! output (str result)))))
+     (fn [result]
+       (reset! output result))))
 
-(defn editor-did-mount [input]
-  (fn [this]
-    (let [cm (.fromTextArea  js/CodeMirror
-                             (dom/dom-node this)
-                             #js {:mode "clojure"
-                                  :lineNumbers true
-                                  :extraKeys #js {
-                                      "Ctrl-Enter" run
-                                  }})]
-      (.on cm "change" #(reset! input (.getValue %))))))
-
-(defn editor [input]
+(defn editor []
   (reagent/create-class
    {:render (fn [] [:textarea
-                    {:default-value ""
+                    {:defaultValue (or (.. js/window.localStorage (getItem "preimp")) "")
                      :auto-complete "off"}])
-    :component-did-mount (editor-did-mount input)}))
+    :component-did-mount (fn [this]
+      (reset! cm (.fromTextArea js/CodeMirror
+                 (dom/dom-node this)
+                 #js {
+                   :mode "clojure"
+                   :lineNumbers true
+                   :extraKeys #js {
+                     "Ctrl-Enter" run
+                   }
+                 })))}))
 
-(defn result-view [output]
-  [:pre>code.clj
-    (with-out-str (pprint @output))])
+(defn output-view []
+  [:pre>code.clj (pr-str @output)])
 
 (defn home-page []
       [:div
-       [editor input]
+       [editor]
        [:div
-        [:button
-         {:on-click run}
-         "run"]]
-       [:div
-        [result-view output]]])
+        [output-view]]])
 
 (defn mount-root []
-  (dom/render [home-page] (.getElementById js/document "app")))
+  (dom/render [home-page] (.getElementById js/document "app"))
+  ;; for some reason eval fails if we run it during load
+  (js/setTimeout #(run) 1))
 
 (defn init! []
   (mount-root))
