@@ -5,15 +5,15 @@
    [cljs.js :refer [empty-state eval-str js-eval]]
    [cljs.pprint :refer [pprint]]
    [cljs.reader :refer [read-string]]))
-   
+
 (defn var->line-col [state var]
-  (-> state 
-  :cljs.analyzer/namespaces 
-  (get 'cljs.user) 
-  :defs 
-  (get var) 
-  (select-keys [:line :column])))
-  
+  (-> state
+      :cljs.analyzer/namespaces
+      (get 'cljs.user)
+      :defs
+      (get var)
+      (select-keys [:line :column])))
+
 (defn var->ix [state var code]
   (let [line-col (var->line-col state var)
         lines (clojure.string/split code "\n")
@@ -28,20 +28,20 @@
                                        open-parens)]
                      (recur (inc ix) open-parens))))]
     [start-ix end-ix]))
-  
+
 (defn replace-var [state var code new-value]
   (let [[start-ix end-ix] (var->ix state var code)]
     (str (subs code 0 start-ix)
          (pr-str `(def ~var ~new-value))
          (subs code end-ix))))
-         
+
 (defn var->value [var]
   (js/eval (str (cljs.compiler.munge (symbol "cljs.user" var)))))
 
 (def cm (atom nil))
 
 (def output (atom [:div "loading..."]))
-         
+
 (defn edit! [var f & args]
   (let [state @(:state @output)
         old-value (var->value var)
@@ -51,27 +51,25 @@
 (defn run []
   (let [input (.getValue @cm)
         state (empty-state)]
-  (eval-str
+    (eval-str
      state
      "(def edit! js/cljs_eval_example.core.edit_BANG_)"
      nil
-     {:eval       js-eval    
+     {:eval       js-eval
       :source-map true
       :context    :statement}
      (fn [_]
-  (eval-str
-     state
-     input
-     nil
-     {:eval       js-eval    
-      :source-map true
-      :context    :statement}
-     (fn [result]
-       (reset! output (merge result {
-           :input input
-           :code (read-string input)
-           :state state
-       }))))))))
+       (eval-str
+        state
+        input
+        nil
+        {:eval       js-eval
+         :source-map true
+         :context    :statement}
+        (fn [result]
+          (reset! output (merge result {:input input
+                                        :code (read-string input)
+                                        :state state}))))))))
 
 (defn editor []
   (reagent/create-class
@@ -79,25 +77,22 @@
                     {:defaultValue (or (.. js/window.localStorage (getItem "preimp")) "")
                      :auto-complete "off"}])
     :component-did-mount (fn [this]
-      (reset! cm (.fromTextArea js/CodeMirror
-                 (dom/dom-node this)
-                 #js {
-                   :mode "clojure"
-                   :lineNumbers true
-                   :extraKeys #js {
-                     "Ctrl-Enter" run
-                   }
-                 }))
-      (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
+                           (reset! cm (.fromTextArea js/CodeMirror
+                                                     (dom/dom-node this)
+                                                     #js {:mode "clojure"
+                                                          :lineNumbers true
+                                                          :extraKeys #js {"Ctrl-Enter" run}}))
+
+                           (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
   [:div (:value @output)])
 
 (defn home-page []
-      [:div
-       [editor]
-       [:div
-        [output-view]]])
+  [:div
+   [editor]
+   [:div
+    [output-view]]])
 
 (defn mount-root []
   (dom/render [home-page] (.getElementById js/document "app"))

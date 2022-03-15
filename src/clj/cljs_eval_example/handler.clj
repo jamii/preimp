@@ -33,7 +33,6 @@
     mount-target
     (include-js "/js/app.js")]))
 
-
 (defn index-handler
   [_request]
   {:status 200

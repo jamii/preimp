@@ -20,7 +20,8 @@
   :plugins [[lein-environ "1.1.0"]
             [lein-cljsbuild "1.1.7"]
             [lein-asset-minifier "0.4.6"
-             :exclusions [org.clojure/clojure]]]
+             :exclusions [org.clojure/clojure]]
+            [lein-cljfmt "0.8.0"]]
 
   :ring {:handler cljs-eval-example.handler/app
          :uberwar-name "cljs-eval-example.war"}
