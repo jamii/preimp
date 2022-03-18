@@ -26,26 +26,26 @@
     (when (get-in todos [id :done])
       (delete id))))
 
-(defn todo-input [{:keys [id title on-save on-stop]}]
+(defn todo-input [{:keys [id class placeholder title on-save on-stop]}]
   (let [value (get input-value id "")
         stop #(do (edit! 'input-value assoc id "")
                   (if on-stop (on-stop)))
         save #(let [v (-> value str clojure.string/trim)]
                 (if-not (empty? v) (on-save v))
                 (stop))]
-    (fn [{:keys [id class placeholder]}]
-      [:input {:type "text" :value value
-               :id id :class class :placeholder placeholder
-               :on-blur save
-               :on-change (fn [e] (edit! 'input-value assoc id (-> e .-target .-value)))
-               :on-key-down #(case (.-which %)
-                               13 (save)
-                               27 (stop)
-                               nil)}])))
+    [:input {:type "text" :value value
+             :id id :class class :placeholder placeholder
+             :on-blur save
+             :on-change (fn [e] (edit! 'input-value assoc id (-> e .-target .-value)))
+             :on-key-down #(case (.-which %)
+                             13 (save)
+                             27 (stop)
+                             nil)}]))
 
-(def todo-edit (with-meta todo-input
-                 {}
-                 #_{:component-did-mount #(.focus (rdom/dom-node %))}))
+(defn todo-edit [props]
+  (with-meta (todo-input props)
+    {}
+    #_{:component-did-mount #(.focus (rdom/dom-node %))}))
 
 (defn todo-stats [{:keys [active done]}]
   (let [props-for (fn [name]
