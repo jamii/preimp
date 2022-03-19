@@ -43,8 +43,9 @@
                              nil)}]))
 
 (defn todo-edit [props]
-  (with-meta (todo-input props)
-    {:component-did-mount #(.focus (rdom/dom-node %))}))
+  (todo-input props)
+  #_(with-meta (todo-input props)
+      {:component-did-mount #(.focus (rdom/dom-node %))}))
 
 (defn todo-stats [{:keys [active done]}]
   (let [props-for (fn [name]
