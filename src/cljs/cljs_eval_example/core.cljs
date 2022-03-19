@@ -185,7 +185,12 @@
    [:div (pr-str :value)
     (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
       (let [color (if (instance? Error value) "red" "black")]
-        [:div [:span {:style {:font-weight "bold" :color color}} (pr-str id)] " " (pr-str value)]))]])
+        [:div
+         [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+         " "
+         (pr-str value)
+         " "
+         [:span {:style {:color "grey"}} (pr-str (get-in @state [:id->deps id]))]]))]])
 
 (defn home-page []
   [:div
