@@ -7,6 +7,27 @@
    [cljs.pprint :refer [pprint]]
    [cljs.reader :refer [read-string]]))
 
+(defn d [x] (prn x) x)
+
+;; --- util ---
+
+(def eval-config
+  {:eval js-eval
+   :source-map true
+   :context :expr})
+
+(defn eval-form [state form]
+  (let [result (atom nil)]
+    (cljs.js/eval state form eval-config #(reset! result %))
+    ;; while eval can be async, it usually isn't
+    (assert @result)
+    @result))
+
+(def eval-state (empty-state))
+(cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
+(eval-form eval-state '(def edit! js/cljs_eval_example.core.edit_BANG_))
+
+;; TODO I think the meta for end-col from tools.reader is accurate, so don't need to parse for end-ix
 (defn line-col->ix [line-col code]
   (let [lines (clojure.string/split code "\n")
         start-ix (+ (reduce + (map #(inc (count %)) (take (dec (:line line-col)) lines))) (dec (:column line-col)))
@@ -27,17 +48,6 @@
          (pr-str `(def ~var ~new-value))
          (subs code end-ix))))
 
-(def cm (atom nil))
-
-(def output (atom {:code ""
-                   :graph {:names []
-                           :name->kind {}
-                           :name->form {}
-                           :name->deps {}
-                           :errors []}
-                   :state {}
-                   :error nil}))
-
 ;; TODO this doesn't handle shadowing global names
 (defn names-into! [form names]
   (cond
@@ -47,126 +57,108 @@
     (symbol? form)
     (swap! names conj form)))
 
-(defn code->graph [code]
-  (let [reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
-        forms (atom [])
-        names (atom [])
-        name->kind (atom {})
-        name->form (atom {})
-        name->deps (atom {})
-        name->def-deps (atom {})
-        name->defn-deps (atom {})
-        errors (atom [])]
-    (while (cljs.tools.reader.reader-types.peek-char reader)
-      ;; reset gensym ids so repeated reads are always identical
-      (reset! cljs.tools.reader.impl.utils/last-id 0)
-      (swap! forms conj (cljs.tools.reader.read reader)))
-    (doseq [form @forms]
-      (if-not (list? form)
-        (swap! errors conj {:not-list form})
-        (let [kind (nth form 0 nil)
-              name (nth form 1 nil)]
-          (if-not (#{'def 'defn} kind)
-            (swap! errors conj {:no-name form})
-            (do
-              (swap! names conj name)
-              (swap! name->kind assoc name kind)
-              (swap! name->form assoc name form))))))
-    (doseq [[name form] @name->form]
-      (let [deps (atom #{})]
-        (names-into! form deps)
-        (swap! name->deps assoc name (into #{} (filter #(and (not= name %) (contains? @name->kind %)) @deps)))))
-    (doseq [name @names]
-      (let [deps (get @name->deps name)
-            def-deps (atom #{})
-            defn-deps (atom #{})]
-        (doseq [dep deps]
-          (case (get @name->kind dep)
-            def
-            (swap! def-deps conj dep)
+;; --- incr ---
 
-            defn
-            (do
-              (swap! defn-deps conj dep)
-              (swap! defn-deps clojure.set/union (get @name->defn-deps dep))
-              (swap! def-deps clojure.set/union (get @name->def-deps dep)))))
-        (swap! name->def-deps assoc name @def-deps)
-        (swap! name->defn-deps assoc name @defn-deps)))
-    {:names @names
-     :name->kind @name->kind
-     :name->form @name->form
-     :name->deps @name->deps
-     :name->def-deps @name->def-deps
-     :name->defn-deps @name->defn-deps
-     :errors @errors}))
+(defprotocol Incremental
+  (compute-impl [this compute]))
 
-(def eval-config
-  {:eval js-eval
-   :source-map true
-   :context :statement})
+(defrecord Code [])
 
-(defn eval-form [state form]
-  (let [result (atom nil)]
-    (cljs.js/eval state form eval-config #(reset! result %))
-    ;; while eval can be async, it usually isn't
-    (assert @result)
-    @result))
+(defrecord Defs []
+  Incremental
+  (compute-impl [this compute]
+    (let [code (compute (Code.))
+          reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
+          defs (atom [])]
+      (while (cljs.tools.reader.reader-types.peek-char reader)
+         ;; reset gensym ids so repeated reads are always identical
+        (reset! cljs.tools.reader.impl.utils/last-id 0)
+        (let [form (cljs.tools.reader.read reader)
+              _ (when-not (list? form)
+                  (throw [:not-list form]))
+              kind (nth form 0 nil)
+              _  (when-not (#{'def 'defn} kind)
+                   (throw [:bad-kind form]))
+              name (nth form 1 nil)
+              _  (when-not name
+                   (throw [:no-name form]))
+              body (-> form rest rest)
+              _ (when-not body
+                  (throw [:no-body form]))]
+          (swap! defs conj {:form form :kind kind :name name :body body})))
+      @defs)))
 
-(defn refresh [old-state old-graph new-graph]
-  (let [new-state (atom {})
-        eval-state (empty-state)
-        error (atom nil)
-        re-evaled (atom #{})
-        unchanged?
-        (fn [name]
-          (and
-           (= (-> old-graph :name->kind name) (-> new-graph :name->kind name))
-           (case (-> new-graph :name->kind name)
-             defn (= (-> old-graph :name->form name) (-> new-graph :name->form name))
-             def (= (old-state name) (@new-state name)))))
-        can-reuse?
-        (fn [name]
-          (and
-           (= (-> old-graph :name->kind name) (-> new-graph :name->kind name))
-           (= (-> old-graph :name->form name) (-> new-graph :name->form name))
-           (case (-> new-graph :name->kind (get name))
-             defn
-             true
+(defrecord Names []
+  Incremental
+  (compute-impl [this compute]
+    (let [defs (compute (Defs.))]
+      (into (sorted-set) (for [def defs] (:name def))))))
 
-             def
-             (and
-              (every? unchanged? (-> new-graph :name->def-deps name))
-              (every? unchanged? (-> new-graph :name->defn-deps name))))))]
-    (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
-    (eval-form eval-state (cljs.tools.reader.read-string "(def edit! js/cljs_eval_example.core.edit_BANG_)"))
-    (doseq [name (:names new-graph)]
-      (when-not @error
-        (if (can-reuse? name)
-          (swap! new-state assoc name (old-state name))
-          (let [result (eval-form eval-state (-> new-graph :name->form name))]
-            (swap! re-evaled conj name)
-            (if (:error result)
-              (do
-                (reset! error (:error result))
-                nil)
-              (swap! new-state assoc name (:value result)))))))
-    {:eval-state eval-state :state @new-state :re-evaled @re-evaled :error @error}))
+(defrecord Def [name]
+  Incremental
+  (compute-impl [this compute]
+    (let [all-defs (compute (Defs.))
+          matching-defs (filter #(= name (:name %)) all-defs)]
+      (case (count matching-defs)
+        0 (throw [:undefined name])
+        1 (first matching-defs)
+        2 (throw [:multiple-defs name])))))
 
-(defn run []
-  (let [old-graph (@output :graph)
-        old-state (@output :state)
-        new-code (.getValue @cm)
-        new-graph (code->graph new-code)
-        refreshed (refresh old-state old-graph new-graph)]
-    (reset! output (merge refreshed {:code new-code
-                                     :graph new-graph}))))
+(defrecord Deps [name]
+  Incremental
+  (compute-impl [this compute]
+    (let [names (compute (Names.))
+          def (compute (Def. name))
+          refers (atom #{})]
+      (names-into! (:form def) refers)
+      (into #{}
+            (filter #(and (not= name %) (names %)) @refers)))))
 
-(defn edit! [var f & args]
-  (let [form (-> @output :graph :name->form (get var))
-        old-value (-> @output :state (get var))
+(defrecord Value [name]
+  Incremental
+  (compute-impl [this compute]
+    (let [def (compute (Def. name))
+          deps (sort (compute (Deps. name)))
+          form (case (:kind def)
+                 def `(fn [~@deps] ~@(:body def))
+                 defn `(fn [~@deps] (fn ~@(:body def))))
+          thunk (eval-form (atom @eval-state) form)
+          args (for [dep deps] (compute (Value. dep)))]
+      (if-let [error (:error :thunk)]
+        (throw error)
+        (apply (:value thunk) args)))))
+
+;; --- state ---
+
+(def cm (atom nil))
+
+(def state
+  (atom {:id->value {}
+         :id->error {}}))
+
+(defn refresh []
+  (reset! state {:id->value {(Code.) (.getValue @cm)}
+                 :id->error {}})
+  (letfn [(compute [id]
+            (if-let [error (get-in @state [:id->error id])]
+              (throw error)
+              (if-let [value (get-in @state [:id->value id])]
+                value
+                (try
+                  (let [value (compute-impl id compute)]
+                    (swap! state update-in [:id->value] assoc id value)
+                    value)
+                  (catch js/Object error
+                    (swap! state update-in [:id->error] assoc id error)
+                    (throw error))))))]
+    (try (compute (Value. 'app)))))
+
+(defn edit! [name f & args]
+  (let [form (get-in @state [:id->value (Def. name) :form])
+        old-value (get-in @state [:id->value (Value. name)])
         new-value (apply f old-value args)]
-    (.setValue @cm (replace-var (meta form) var (.getValue @cm) new-value))
-    (run)))
+    (.setValue @cm (replace-var (meta form) name (.getValue @cm) new-value))
+    (refresh)))
 
 (defn editor []
   (reagent/create-class
@@ -178,15 +170,15 @@
                                                      (dom/dom-node this)
                                                      #js {:mode "clojure"
                                                           :lineNumbers true
-                                                          :extraKeys #js {"Ctrl-Enter" run}}))
+                                                          :extraKeys #js {"Ctrl-Enter" (fn [_] (refresh))}}))
 
                            (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
   [:div
-   [:div (or (-> @output :state (get 'app)) (pr-str (:error @output)))]
-   [:div (pr-str {:re-evaled (-> @output :re-evaled)})]
-   [:div (pr-str {:error (-> @output :error)})]])
+   [:div (get-in @state [:id->value (Value. 'app)])]
+   [:div (pr-str :value) (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)] " " (pr-str value)])]
+   [:div (pr-str :error) (for [[id error] (sort-by #(pr-str (first %)) (@state :id->error))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)] " " (pr-str error)])]])
 
 (defn home-page []
   [:div
@@ -197,7 +189,7 @@
 (defn mount-root []
   (dom/render [home-page] (.getElementById js/document "app"))
   ;; for some reason eval fails if we run it during load
-  (js/setTimeout #(run) 1))
+  (js/setTimeout #(refresh) 1))
 
 (defn init! []
   (mount-root))
