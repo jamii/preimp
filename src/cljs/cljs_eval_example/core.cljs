@@ -83,7 +83,7 @@
               _  (when-not name
                    (throw [:no-name form]))
               body (-> form rest rest)
-              _ (when-not body
+              _ (when (= (count body) 0)
                   (throw [:no-body form]))]
           (swap! defs conj {:form form :kind kind :name name :body body})))
       @defs)))
@@ -134,23 +134,27 @@
 
 (def state
   (atom {:id->value {}
-         :id->error {}}))
+         :refreshed #{}}))
+(defrecord Error [error])
 
 (defn refresh []
   (reset! state {:id->value {(Code.) (.getValue @cm)}
-                 :id->error {}})
+                 :refreshed #{}})
   (letfn [(compute [id]
-            (if-let [error (get-in @state [:id->error id])]
-              (throw error)
-              (if-let [value (get-in @state [:id->value id])]
-                value
-                (try
-                  (let [value (compute-impl id compute)]
-                    (swap! state update-in [:id->value] assoc id value)
-                    value)
-                  (catch js/Object error
-                    (swap! state update-in [:id->error] assoc id error)
-                    (throw error))))))]
+            (let [value (or
+                         (get-in @state [:id->value id])
+                         (let [deps (atom #{})
+                               value (try
+                                       (compute-impl id (fn [id] (swap! deps conj id) (compute id)))
+                                       (catch :default error
+                                         (Error. error)))]
+                           (swap! state update-in [:refreshed] conj id)
+                           (swap! state update-in [:id->value] assoc id value)
+                           (swap! state update-in [:id->deps] assoc id @deps)
+                           value))]
+              (if (instance? Error value)
+                (throw (:error value))
+                value)))]
     (try (compute (Value. 'app)))))
 
 (defn edit! [name f & args]
@@ -177,8 +181,11 @@
 (defn output-view []
   [:div
    [:div (get-in @state [:id->value (Value. 'app)])]
-   [:div (pr-str :value) (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)] " " (pr-str value)])]
-   [:div (pr-str :error) (for [[id error] (sort-by #(pr-str (first %)) (@state :id->error))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)] " " (pr-str error)])]])
+   [:div (pr-str :refreshed) (for [id (sort-by pr-str (@state :refreshed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
+   [:div (pr-str :value)
+    (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+      (let [color (if (instance? Error value) "red" "black")]
+        [:div [:span {:style {:font-weight "bold" :color color}} (pr-str id)] " " (pr-str value)]))]])
 
 (defn home-page []
   [:div

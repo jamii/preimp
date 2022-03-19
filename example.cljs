@@ -1,8 +1,8 @@
-(def todos (sorted-map))
+(def todos {})
 
-(def next-id 0)
+(def next-id 18)
 
-(def input-value {})
+(def input-value {"new-todo" ""})
 
 (def editing #{})
 
@@ -28,7 +28,7 @@
 
 (defn todo-input [{:keys [id class placeholder title on-save on-stop]}]
   (let [value (get input-value id "")
-        stop #(do (edit! 'input-value assoc id "")
+        stop #(do (edit! 'input-value dissoc id)
                   (if on-stop (on-stop)))
         save #(let [v (-> value str clojure.string/trim)]
                 (if-not (empty? v) (on-save v))
@@ -44,8 +44,7 @@
 
 (defn todo-edit [props]
   (with-meta (todo-input props)
-    {}
-    #_{:component-did-mount #(.focus (rdom/dom-node %))}))
+    {:component-did-mount #(.focus (rdom/dom-node %))}))
 
 (defn todo-stats [{:keys [active done]}]
   (let [props-for (fn [name]
@@ -85,9 +84,9 @@
      [:section#todoapp
       [:header#header
        [:h1 "todos"]
-       [todo-input {:id "new-todo"
+       (todo-input {:id "new-todo"
                     :placeholder "What needs to be done?"
-                    :on-save add-todo}]]
+                    :on-save add-todo})]
       (when (-> items count pos?)
         [:div
          [:section#main
