@@ -116,7 +116,7 @@
       (into #{}
             (filter #(and (not= name %) (names %)) @refers)))))
 
-(defrecord Value [name]
+(defrecord Thunk [name]
   Incremental
   (compute* [this compute]
     (let [def (compute (Def. name))
@@ -124,11 +124,18 @@
           form (case (:kind def)
                  def `(fn [~@deps] ~@(:body def))
                  defn `(fn [~@deps] (fn ~@(:body def))))
-          thunk (eval-form (atom @eval-state) form)
-          args (for [dep deps] (compute (Value. dep)))]
+          thunk (eval-form (atom @eval-state) form)]
       (if-let [error (:error :thunk)]
         (throw error)
-        (apply (:value thunk) args)))))
+        {:thunk (:value thunk)
+         :args deps}))))
+
+(defrecord Value [name]
+  Incremental
+  (compute* [this compute]
+    (let [thunk (compute (Thunk. name))
+          args (for [arg (:args thunk)] (compute (Value. arg)))]
+      (apply (:thunk thunk) args))))
 
 ;; --- state ---
 
@@ -141,15 +148,15 @@
       ;; the last version at which this id was computed
          :id->version {(Code.) 0}
 
-;; the value when this id was last computed
+      ;; the value when this id was last computed
       ;; (may be an Error)
          :id->value {(Code.) ""}
 
-;; other id/value pairs that were used to compute this id
+      ;; other id/value pairs that were used to compute this id
          :id->deps {}
 
       ;; the set of ids which were recomputed in the last recompute
-     ;; (used only for debugging) 
+      ;; (used only for debugging) 
          :recomputed #{}}))
 
 (defrecord Error [error])
@@ -200,8 +207,7 @@
     (get-in @state [:id->value id])))
 
 (defn recall-or-recompute-all []
-  (swap! state merge {:recomputed #{}
-                      :changed #{}})
+  (swap! state assoc :recomputed #{})
   (recall-or-recompute (Value. 'app)))
 
 (defn edit! [name f & args]
@@ -230,7 +236,7 @@
 (defn output-view []
   [:div
    [:div (get-in @state [:id->value (Value. 'app)])]
-   [:div (pr-str :recomputed) (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])] [:div (pr-str :changed) (for [id (sort-by pr-str (@state :changed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
+   [:div (pr-str :recomputed) (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
    [:div (pr-str :value)
     (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
       (let [color (if (instance? Error value) "red" "black")]
