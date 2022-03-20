@@ -1,12 +1,12 @@
-(def todos {})
+(defs todos {})
 
-(def next-id 18)
+(defs next-id 18)
 
-(def input-value {"new-todo" ""})
+(defs input-value {"new-todo" ""})
 
-(def editing #{})
+(defs editing #{})
 
-(def filt :all)
+(defs filt :all)
 
 (defn add-todo [text]
   (let [id next-id]

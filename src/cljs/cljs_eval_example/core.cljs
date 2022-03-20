@@ -26,7 +26,8 @@
 (def eval-state (empty-state))
 (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
 (declare edit!)
-(aset js/cljs.user 'edit_BANG_' edit!)
+(aset js/cljs "user" #js {})
+(aset js/cljs.user "edit_BANG_" edit!)
 (eval-form eval-state '(def edit! js/cljs_eval_example.core.edit_BANG_))
 
 ;; TODO I think the meta for end-col from tools.reader is accurate, so don't need to parse for end-ix
@@ -44,10 +45,10 @@
                      (recur (inc ix) open-parens))))]
     [start-ix end-ix]))
 
-(defn replace-var [line-col var code new-value]
+(defn replace-defs [line-col name code new-value]
   (let [[start-ix end-ix] (line-col->ix line-col code)]
     (str (subs code 0 start-ix)
-         (pr-str `(def ~var ~new-value))
+         (pr-str `(~'defs ~name ~new-value))
          (subs code end-ix))))
 
 ;; TODO this doesn't handle shadowing global names
@@ -79,7 +80,7 @@
               _ (when-not (list? form)
                   (throw [:not-list form]))
               kind (nth form 0 nil)
-              _  (when-not (#{'def 'defn} kind)
+              _  (when-not (#{'defs 'def 'defn} kind)
                    (throw [:bad-kind form]))
               name (nth form 1 nil)
               _  (when-not name
@@ -120,15 +121,20 @@
   Incremental
   (compute* [this compute]
     (let [def (compute (Def. name))
-          deps (sort (compute (Deps. name)))
-          form (case (:kind def)
-                 def `(fn [~@deps] ~@(:body def))
-                 defn `(fn [~@deps] (fn ~@(:body def))))
-          thunk (eval-form (atom @eval-state) form)]
-      (if-let [error (:error :thunk)]
-        (throw error)
-        {:thunk (:value thunk)
-         :args deps}))))
+          kind (:kind def)]
+      (if (= kind 'defs)
+        {:thunk (let [value (last (:body def))] (fn [] value))
+         :args '()}
+        (let [deps (sort (compute (Deps. name)))
+              form (case kind
+                     def `(fn [~@deps] ~@(:body def))
+
+                     defn `(fn [~@deps] (fn ~@(:body def))))
+              thunk (eval-form (atom @eval-state) form)]
+          (if-let [error (:error :thunk)]
+            (throw error)
+            {:thunk (:value thunk)
+             :args deps}))))))
 
 (defrecord Value [name]
   Incremental
@@ -183,8 +189,8 @@
                                      (if (instance? Error value)
                                        (throw (:error value))
                                        value))))
-                    (catch :default error
-                      (Error. error)))]
+                    #_(catch :default error
+                        (Error. error)))]
     (swap! state update-in [:id->version] assoc id (@state :version))
     (swap! state update-in [:id->value] assoc id new-value)
     (swap! state update-in [:id->deps] assoc id @new-deps)
@@ -214,7 +220,7 @@
   (let [form (get-in @state [:id->value (Def. name) :form])
         old-value (get-in @state [:id->value (Value. name)])
         new-value (apply f old-value args)]
-    (.setValue @cm (replace-var (meta form) name (.getValue @cm) new-value))
+    (.setValue @cm (replace-defs (meta form) name (.getValue @cm) new-value))
     (change-code (.getValue @cm))
     (recall-or-recompute-all)))
 
