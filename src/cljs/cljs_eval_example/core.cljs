@@ -18,17 +18,14 @@
 
 (defn eval-form [state form]
   (let [result (atom nil)]
-    (cljs.js/eval state form eval-config #(reset! result %))
+    (cljs.js/eval state `(let [~'edit! ~'cljs-eval-example.core/edit!] ~form) eval-config #(reset! result %))
     ;; while eval can be async, it usually isn't
     (assert @result)
     @result))
 
 (def eval-state (empty-state))
 (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
-(declare edit!)
-(aset js/cljs "user" #js {})
-(aset js/cljs.user "edit_BANG_" edit!)
-(eval-form eval-state '(def edit! js/cljs_eval_example.core.edit_BANG_))
+(cljs.js/load-analysis-cache! eval-state 'cljs-eval-example.core (analyzer-state 'cljs-eval-example.core))
 
 ;; TODO I think the meta for end-col from tools.reader is accurate, so don't need to parse for end-ix
 (defn line-col->ix [line-col code]
@@ -216,13 +213,24 @@
   (swap! state assoc :recomputed #{})
   (recall-or-recompute (Value. 'app)))
 
+(def needs-recall-or-recompute-all (atom false))
+
+(defn unqueue-recall-or-recompute-all []
+  (when @needs-recall-or-recompute-all
+    (reset! needs-recall-or-recompute-all false)
+    (recall-or-recompute-all)))
+
+(defn queue-recall-or-recompute-all []
+  (reset! needs-recall-or-recompute-all true)
+  (js/setTimeout #(unqueue-recall-or-recompute-all) 0))
+
 (defn edit! [name f & args]
   (let [form (get-in @state [:id->value (Def. name) :form])
         old-value (get-in @state [:id->value (Value. name)])
         new-value (apply f old-value args)]
     (.setValue @cm (replace-defs (meta form) name (.getValue @cm) new-value))
     (change-code (.getValue @cm))
-    (recall-or-recompute-all)))
+    (queue-recall-or-recompute-all)))
 
 (defn editor []
   (reagent/create-class
@@ -236,24 +244,25 @@
                                                           :lineNumbers true
                                                           :extraKeys #js {"Ctrl-Enter" (fn [_]
                                                                                          (change-code (.getValue @cm))
-                                                                                         (recall-or-recompute-all))}}))
+                                                                                         (queue-recall-or-recompute-all))}}))
                            (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
   [:div
    [:div (get-in @state [:id->value (Value. 'app)])]
-   [:div (pr-str :recomputed) (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
-   [:div (pr-str :value)
-    (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
-      (let [color (if (instance? Error value) "red" "black")]
-        [:div
-         [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-         " "
-         [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
-         " "
-         (pr-str value)
-         " "
-         [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))]])
+   #_[:div ":debug"
+      [:div (pr-str :recomputed) (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
+      [:div (pr-str :value)
+       (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+         (let [color (if (instance? Error value) "red" "black")]
+           [:div
+            [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+            " "
+            [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+            " "
+            (pr-str value)
+            " "
+            [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))]]])
 
 (defn home-page []
   [:div
@@ -267,7 +276,7 @@
   (js/setTimeout
    (fn []
      (change-code (.getValue @cm))
-     (recall-or-recompute-all))
+     (queue-recall-or-recompute-all))
    1))
 
 (defn init! []
