@@ -164,10 +164,10 @@
 
 (defrecord Error [error])
 
-(defn change-code [value]
+(defn change-input [id value]
   (swap! state update-in [:version] inc)
-  (swap! state assoc-in [:id->version (Code.)] (:version @state))
-  (swap! state assoc-in [:id->value (Code.)] value))
+  (swap! state assoc-in [:id->version id] (:version @state))
+  (swap! state assoc-in [:id->value id] value))
 
 (declare recall-or-recompute)
 
@@ -229,7 +229,8 @@
         old-value (get-in @state [:id->value (Value. name)])
         new-value (apply f old-value args)]
     (.setValue @cm (replace-defs (meta form) name (.getValue @cm) new-value))
-    (change-code (.getValue @cm))
+    (change-input (Code.) (.getValue @cm))
+    (change-input (Value. name) new-value)
     (queue-recall-or-recompute-all)))
 
 (defn editor []
@@ -243,7 +244,7 @@
                                                      #js {:mode "clojure"
                                                           :lineNumbers true
                                                           :extraKeys #js {"Ctrl-Enter" (fn [_]
-                                                                                         (change-code (.getValue @cm))
+                                                                                         (change-input (Code.) (.getValue @cm))
                                                                                          (queue-recall-or-recompute-all))}}))
                            (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
@@ -275,7 +276,7 @@
   ;; for some reason eval fails if we run it during load
   (js/setTimeout
    (fn []
-     (change-code (.getValue @cm))
+     (change-input (Code.) (.getValue @cm))
      (queue-recall-or-recompute-all))
    1))
 
