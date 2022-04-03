@@ -3,6 +3,8 @@
   (:require
    cljsjs.codemirror
    cljsjs.codemirror.mode.clojure
+   cljsjs.codemirror.addon.edit.matchbrackets
+   cljsjs.codemirror.addon.comment.comment
    [reagent.dom :as dom]
    [reagent.core :as reagent :refer [atom]]
    [cljs.js :refer [empty-state eval-str js-eval]]
@@ -247,7 +249,8 @@
                                                           :lineNumbers true
                                                           :extraKeys #js {"Ctrl-Enter" (fn [_]
                                                                                          (change-input (Code.) (.getValue @cm))
-                                                                                         (queue-recall-or-recompute-all))}}))
+                                                                                         (queue-recall-or-recompute-all))}
+                                                          :matchBrackets true}))
                            (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
 
 (defn output-view []
