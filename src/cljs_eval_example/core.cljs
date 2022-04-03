@@ -1,6 +1,7 @@
 (ns cljs-eval-example.core
   (:require-macros [cljs-eval-example.core :refer [analyzer-state]])
   (:require
+   cljsjs.codemirror
    [reagent.dom :as dom]
    [reagent.core :as reagent :refer [atom]]
    [cljs.js :refer [empty-state eval-str js-eval]]

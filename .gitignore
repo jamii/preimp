@@ -1,4 +1,2 @@
+out
 *.log
-target
-.rebel_readline_history
-.lein-env
