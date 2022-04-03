@@ -150,21 +150,21 @@
 
 (def state
   (r/atom {;; version increments on every change made from the outside
-         :version 0
+           :version 0
 
       ;; the last version at which this id was computed
-         :id->version {(Code.) 0}
+           :id->version {(Code.) 0}
 
       ;; the value when this id was last computed
       ;; (may be an Error)
-         :id->value {(Code.) ""}
+           :id->value {(Code.) ""}
 
       ;; other id/value pairs that were used to compute this id
-         :id->deps {}
+           :id->deps {}
 
       ;; the set of ids which were recomputed in the last recompute
       ;; (used only for debugging) 
-         :recomputed #{}}))
+           :recomputed #{}}))
 
 (defrecord Error [error])
 
@@ -214,8 +214,10 @@
     (get-in @state [:id->value id])))
 
 (defn recall-or-recompute-all []
-  (swap! state assoc :recomputed #{})
-  (recall-or-recompute (Value. 'app)))
+  (swap! state assoc :recomputed #{} :error nil)
+  (try
+    (recall-or-recompute (Value. 'app))
+    (catch :default err (swap! state assoc :error err))))
 
 (def needs-recall-or-recompute-all (atom false))
 
@@ -269,19 +271,17 @@
             (pr-str value)
             " "
             [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))]]])
-            
+
 (defn err-boundary
   [& children]
-  (let [err-state (r/atom nil)]
-    (r/create-class
-      {:display-name "ErrBoundary"
-       :component-did-catch (fn [err info]
-                              (reset! err-state [err info]))
-       :reagent-render (fn [& children]
-                         (if (nil? @err-state)
-                           (into [:<>] children)
-                           (let [[_ info] @err-state]
-                             [:pre [:code (pr-str info)]])))})))
+  (r/create-class
+   {:display-name "ErrBoundary"
+    :component-did-catch (fn [err info]
+                           (swap! state assoc :error [err info]))
+    :reagent-render (fn [& children]
+                      (if-let [err (get-in @state [:error])]
+                        [:pre [:code (pr-str err)]]
+                        (into [:<>] children)))}))
 
 (defn app []
   [:div
