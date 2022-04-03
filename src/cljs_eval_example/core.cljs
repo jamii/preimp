@@ -6,7 +6,7 @@
    cljsjs.codemirror.addon.edit.matchbrackets
    cljsjs.codemirror.addon.comment.comment
    [reagent.dom :as dom]
-   [reagent.core :as reagent :refer [atom]]
+   [reagent.core :as r]
    [cljs.js :refer [empty-state eval-str js-eval]]
    [cljs.pprint :refer [pprint]]
    [cljs.reader :refer [read-string]]))
@@ -149,7 +149,7 @@
 (def cm (atom nil))
 
 (def state
-  (atom {;; version increments on every change made from the outside
+  (r/atom {;; version increments on every change made from the outside
          :version 0
 
       ;; the last version at which this id was computed
@@ -238,7 +238,7 @@
     (queue-recall-or-recompute-all)))
 
 (defn editor []
-  (reagent/create-class
+  (r/create-class
    {:render (fn [] [:textarea
                     {:defaultValue (or (.. js/window.localStorage (getItem "preimp")) "")
                      :auto-complete "off"}])
@@ -269,15 +269,28 @@
             (pr-str value)
             " "
             [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))]]])
+            
+(defn err-boundary
+  [& children]
+  (let [err-state (r/atom nil)]
+    (r/create-class
+      {:display-name "ErrBoundary"
+       :component-did-catch (fn [err info]
+                              (reset! err-state [err info]))
+       :reagent-render (fn [& children]
+                         (if (nil? @err-state)
+                           (into [:<>] children)
+                           (let [[_ info] @err-state]
+                             [:pre [:code (pr-str info)]])))})))
 
-(defn home-page []
+(defn app []
   [:div
    [editor]
    [:div
-    [output-view]]])
+    [err-boundary [output-view]]]])
 
 (defn mount-root []
-  (dom/render [home-page] (.getElementById js/document "app"))
+  (dom/render [app] (.getElementById js/document "app"))
   ;; for some reason eval fails if we run it during load
   (js/setTimeout
    (fn []
