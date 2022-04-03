@@ -11,12 +11,10 @@
 
     [:meta {:charset "utf-8"}]
     [:meta {:name "viewport"
-            :content "width=device-width, initial-scale=1"}]
-   ; TODO get css from deps
-    (include-css "//cdnjs.cloudflare.com/ajax/libs/codemirror/5.44.0/codemirror.min.css")]
+            :content "width=device-width, initial-scale=1"}]]
    [:body
     [:div#app "loading..."]
-
+    (include-css "cljsjs/codemirror/development/codemirror.css")
     (include-js "out/main.js")]))
 
 (defn handler [_request]
@@ -26,7 +24,8 @@
 
 (def app
   (-> handler
-      (wrap-file "public" {:allow-symlinks? true})))
+      (wrap-file "public" {:allow-symlinks? true})
+      (wrap-resource "")))
 
 (defmacro analyzer-state [[_ ns-sym]]
   `'~(get-in @cljs.env/*compiler* [:cljs.analyzer/namespaces ns-sym]))
