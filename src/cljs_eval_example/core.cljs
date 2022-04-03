@@ -283,3 +283,5 @@
 
 (defn init! []
   (mount-root))
+
+(init!)

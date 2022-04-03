@@ -6,7 +6,7 @@
 
   :dependencies [[org.clojure/clojure "1.10.3"]
                  [ring-server "0.5.0"]
-                 [reagent "1.0.0"]                 
+                 [reagent "1.0.0"]
                  [ring "1.8.1"]
                  [ring/ring-defaults "0.3.2"]
                  [hiccup "1.0.5"]
@@ -16,7 +16,7 @@
                  [metosin/reitit "0.5.12"]]
 
   :jvm-opts ["-Xmx1G"]
-  
+
   :plugins [[lein-environ "1.1.0"]
             [lein-cljsbuild "1.1.7"]
             [lein-asset-minifier "0.4.6"
@@ -51,8 +51,7 @@
               :optimizations :simple
               :pretty-print true
               :optimize-constants true
-              :static-fns true
-          }}
+              :static-fns true}}
             :app
             {:source-paths ["src/cljs" "src/cljc" "env/dev/cljs"]
              :figwheel {:on-jsload "cljs-eval-example.core/mount-root"}
@@ -69,8 +68,7 @@
   {:http-server-root "public"
    :server-port 3449
    :nrepl-port 7002
-   :nrepl-middleware [cider.piggieback/wrap-cljs-repl
-                      ]
+   :nrepl-middleware [cider.piggieback/wrap-cljs-repl]
    :css-dirs ["resources/public/css"]
    :ring-handler cljs-eval-example.handler/app}
 
@@ -83,8 +81,7 @@
                                   [pjstadig/humane-test-output "0.10.0"]]
 
                    :source-paths ["env/dev/clj"]
-                   :plugins [[lein-figwheel "0.5.20"]
-]
+                   :plugins [[lein-figwheel "0.5.20"]]
 
                    :injections [(require 'pjstadig.humane-test-output)
                                 (pjstadig.humane-test-output/activate!)]
