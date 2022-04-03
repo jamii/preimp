@@ -12,6 +12,6 @@ in
 
 pkgs.mkShell rec {
     buildInputs = [
-        pkgs.leiningen
+        pkgs.clojure
     ];
 }
