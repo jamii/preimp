@@ -48,9 +48,11 @@
              {:output-to        "target/cljsbuild/public/js/app.js"
               :output-dir       "target/cljsbuild/public/js"
               :source-map       "target/cljsbuild/public/js/app.js.map"
-              :optimizations :advanced
-              :infer-externs true
-              :pretty-print  false}}
+              :optimizations :simple
+              :pretty-print true
+              :optimize-constants true
+              :static-fns true
+          }}
             :app
             {:source-paths ["src/cljs" "src/cljc" "env/dev/cljs"]
              :figwheel {:on-jsload "cljs-eval-example.core/mount-root"}
@@ -89,7 +91,7 @@
 
                    :env {:dev true}}
 
-             :uberjar {:hooks [minify-assets.plugin/hooks]
+             :uberjar {; :hooks [minify-assets.plugin/hooks]
                        :source-paths ["env/prod/clj"]
                        :prep-tasks ["compile" ["cljsbuild" "once" "min"]]
                        :env {:production true}
