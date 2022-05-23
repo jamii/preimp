@@ -26,7 +26,7 @@
     (when (get-in todos [id :done])
       (delete id))))
 
-(defn todo-input [{:keys [id class placeholder title on-save on-stop]}]
+(defn todo-input [{:keys [id class placeholder on-save on-stop]}]
   (let [value (get input-value id "")
         stop #(do (edit! 'input-value dissoc id)
                   (if on-stop (on-stop)))
@@ -43,7 +43,7 @@
                              nil)}]))
 
 (defn todo-edit [props]
-  (todo-input props)
+  [todo-input props]
   #_(with-meta (todo-input props)
       {:component-did-mount #(.focus (rdom/dom-node %))}))
 
@@ -73,7 +73,7 @@
       [:button.destroy {:on-click #(delete id)}]]
      (when (contains? editing id)
        [todo-edit {:id id
-                   :class "edit" :title title
+                   :class "edit"
                    :on-save #(save id %)
                    :on-stop #(edit! 'editing disj id)}])]))
 
@@ -85,9 +85,9 @@
      [:section#todoapp
       [:header#header
        [:h1 "todos"]
-       (todo-input {:id "new-todo"
+       [todo-input {:id "new-todo"
                     :placeholder "What needs to be done?"
-                    :on-save add-todo})]
+                    :on-save add-todo}]]
       (when (-> items count pos?)
         [:div
          [:section#main

@@ -257,20 +257,20 @@
 
 (defn output-view []
   [:div
-   [:div (get-in @state [:id->value (Value. 'app)])]
+   ^{:key :app} [:div (get-in @state [:id->value (Value. 'app)])]
    #_[:div ":debug"
-      [:div (pr-str :recomputed) (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]])]
+      [:div (pr-str :recomputed) (doall (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]]))]
       [:div (pr-str :value)
-       (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
-         (let [color (if (instance? Error value) "red" "black")]
-           [:div
-            [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-            " "
-            [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
-            " "
-            (pr-str value)
-            " "
-            [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))]]])
+       (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+                (let [color (if (instance? Error value) "red" "black")]
+                  [:div
+                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+                   " "
+                   [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+                   " "
+                   (pr-str value)
+                   " "
+                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))]]])
 
 (defn err-boundary
   [& children]
