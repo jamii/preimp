@@ -1,4 +1,4 @@
-(ns cljs-eval-example.core
+(ns preimp.core
   (:require
    [cljs.env]
    [hiccup.page :refer [include-js include-css html5]]

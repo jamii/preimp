@@ -3,18 +3,18 @@ Prototyping interactions for [imp](https://github.com/jamii/imp) without getting
 Build:
 
 ``` bash
-clj -M --main cljs.main --compile cljs-eval-example.core
+clj -M --main cljs.main --compile preimp.core
 
 # or 
 
-clj -M --main cljs.main --watch src --compile cljs-eval-example.core
+clj -M --main cljs.main --watch src --compile preimp.core
 ```
 
 Serve:
 
 ``` bash
-(require 'cljs-eval-example.server :reload-all)
-(cljs-eval-example.server/-main)
+(require 'preimp.server :reload-all)
+(preimp.server/-main)
 ```
 
 Format:

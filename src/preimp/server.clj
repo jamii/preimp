@@ -1,6 +1,6 @@
-(ns cljs-eval-example.server
+(ns preimp.server
   (:require
-   [cljs-eval-example.core :refer [app]]
+   [preimp.core :refer [app]]
    [ring.adapter.jetty :refer [run-jetty]])
   (:gen-class))
 

@@ -1,5 +1,5 @@
-(ns cljs-eval-example.core
-  (:require-macros [cljs-eval-example.core :refer [analyzer-state]])
+(ns preimp.core
+  (:require-macros [preimp.core :refer [analyzer-state]])
   (:require
    cljsjs.codemirror
    cljsjs.codemirror.mode.clojure
@@ -22,14 +22,14 @@
 
 (defn eval-form [state form]
   (let [result (atom nil)]
-    (cljs.js/eval state `(let [~'edit! ~'cljs-eval-example.core/edit!] ~form) eval-config #(reset! result %))
+    (cljs.js/eval state `(let [~'edit! ~'preimp.core/edit!] ~form) eval-config #(reset! result %))
     ;; while eval can be async, it usually isn't
     (assert @result)
     @result))
 
 (def eval-state (empty-state))
 (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
-(cljs.js/load-analysis-cache! eval-state 'cljs-eval-example.core (analyzer-state 'cljs-eval-example.core))
+(cljs.js/load-analysis-cache! eval-state 'preimp.core (analyzer-state 'preimp.core))
 
 ;; TODO I think the meta for end-col from tools.reader is accurate, so don't need to parse for end-ix
 (defn line-col->ix [line-col code]
