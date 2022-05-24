@@ -11,7 +11,7 @@
    [cljs.pprint :refer [pprint]]
    [cljs.reader :refer [read-string]]))
 
-(defn d [& args] (prn args) (last args))
+(defn d [& args] (js/console.log (pr-str args)) (last args))
 
 ;; --- util ---
 
@@ -66,12 +66,14 @@
 (defprotocol Incremental
   (compute* [this compute]))
 
-(defrecord Code [])
+(defrecord CellIds [])
 
-(defrecord Defs []
+(defrecord CellCode [id])
+
+(defrecord CellParse [id]
   Incremental
   (compute* [this compute]
-    (let [code (compute (Code.))
+    (let [code (compute (CellCode. id))
           reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
           defs (atom [])]
       (while (cljs.tools.reader.reader-types.peek-char reader)
@@ -89,24 +91,36 @@
               body (-> form rest rest)
               _ (when (= (count body) 0)
                   (throw [:no-body form]))]
-          (swap! defs conj {:form form :kind kind :name name :body body})))
-      @defs)))
+          (swap! defs conj {:cell-id id :form form :kind kind :name name :body body})))
+      (case (count @defs)
+        0 (throw [:no-def-in-cell id])
+        1 (first @defs)
+        (throw [:multiple-defs-in-cell id])))))
 
 (defrecord Names []
   Incremental
   (compute* [this compute]
-    (let [defs (compute (Defs.))]
-      (into (sorted-set) (for [def defs] (:name def))))))
+    (let [cell-ids (compute (CellIds.))]
+      (into #{}
+            (for [cell-id cell-ids
+                  :let [cell-parse (try
+                                     (compute (CellParse. cell-id))
+                                     (catch :default error nil))]
+                  :when cell-parse]
+              (:name cell-parse))))))
 
 (defrecord Def [name]
   Incremental
   (compute* [this compute]
-    (let [all-defs (compute (Defs.))
-          matching-defs (filter #(= name (:name %)) all-defs)]
+    (let [cell-ids (compute (CellIds.))
+          cell-parses (for [cell-id cell-ids]
+                        (try (compute (CellParse. cell-id))
+                             (catch :default error nil)))
+          matching-defs (filter #(= name (:name %)) cell-parses)]
       (case (count matching-defs)
-        0 (throw [:undefined name])
+        0 (throw [:no-def-for-name name])
         1 (first matching-defs)
-        2 (throw [:multiple-defs name])))))
+        2 (throw [:multiple-defs-for-name name])))))
 
 (defrecord Deps [name]
   Incremental
@@ -146,25 +160,23 @@
 
 ;; --- state ---
 
-(def cm (atom nil))
+(def next-cell-id (atom 0))
+
+(def codemirrors (atom {}))
 
 (def state
   (r/atom {;; version increments on every change made from the outside
            :version 0
 
       ;; the last version at which this id was computed
-           :id->version {(Code.) 0}
+           :id->version {(CellIds.) 0}
 
       ;; the value when this id was last computed
       ;; (may be an Error)
-           :id->value {(Code.) ""}
+           :id->value {(CellIds.) []}
 
       ;; other id/value pairs that were used to compute this id
-           :id->deps {}
-
-      ;; the set of ids which were recomputed in the last recompute
-      ;; (used only for debugging) 
-           :recomputed #{}}))
+           :id->deps {}}))
 
 (defrecord Error [error])
 
@@ -182,6 +194,7 @@
    (get-in @state [:id->deps id])))
 
 (defn recompute [id]
+  (d :recompute id)
   (let [new-deps (atom {})
         new-value (try
                     (compute* id (fn [id]
@@ -190,113 +203,94 @@
                                      (if (instance? Error value)
                                        (throw (:error value))
                                        value))))
-                    #_(catch :default error
-                        (Error. error)))]
+                    (catch :default error
+                      (Error. error)))]
     (swap! state update-in [:id->version] assoc id (@state :version))
     (swap! state update-in [:id->value] assoc id new-value)
     (swap! state update-in [:id->deps] assoc id @new-deps)
-    (swap! state update-in [:recomputed] conj id)
     new-value))
 
 (defn recall-or-recompute [id]
-  (cond
-    (not (contains? (@state :id->value) id))
+  (if
+   (or (not (contains? (@state :id->value) id))
+       (and (not= (get-in @state [:id->version id]) (:version @state))
+            (deps-changed? id)))
     (recompute id)
-
-    (not= (:version @state) (get-in @state [:id->version id]))
-    (if (deps-changed? id)
-      (recompute id)
-      (do
-        (swap! state assoc-in [:id->version id] (get-in @state [:id->version id]))
-        (get-in @state [:id->value id])))
-
-    :else
-    (get-in @state [:id->value id])))
-
-(defn recall-or-recompute-all []
-  (swap! state assoc :recomputed #{} :error nil)
-  (try
-    (recall-or-recompute (Value. 'app))
-    (catch :default err (swap! state assoc :error err))))
-
-(def needs-recall-or-recompute-all (atom false))
-
-(defn unqueue-recall-or-recompute-all []
-  (when @needs-recall-or-recompute-all
-    (reset! needs-recall-or-recompute-all false)
-    (recall-or-recompute-all)))
-
-(defn queue-recall-or-recompute-all []
-  (reset! needs-recall-or-recompute-all true)
-  (js/setTimeout #(unqueue-recall-or-recompute-all) 0))
+    (do
+      (swap! state assoc-in [:id->version id] (:version @state))
+      (get-in @state [:id->value id]))))
 
 (defn edit! [name f & args]
-  (let [form (get-in @state [:id->value (Def. name) :form])
-        old-value (get-in @state [:id->value (Value. name)])
-        new-value (apply f old-value args)]
-    (.setValue @cm (replace-defs (meta form) name (.getValue @cm) new-value))
-    (change-input (Code.) (.getValue @cm))
-    (change-input (Value. name) new-value)
-    (queue-recall-or-recompute-all)))
+  (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
+        old-value (recall-or-recompute (Value. name))
+        new-value (apply f old-value args)
+        new-code (pr-str `(~'defs ~name ~new-value))]
+    (.setValue (get @codemirrors cell-id) new-code)
+    (change-input (CellCode. cell-id) new-code)
+    (change-input (Value. name) new-value)))
 
-(defn editor []
+(defn editor [cell-id]
   (r/create-class
-   {:render (fn [] [:textarea
-                    {:defaultValue (or (.. js/window.localStorage (getItem "preimp")) "")
-                     :auto-complete "off"}])
-    :component-did-mount (fn [this]
-                           (reset! cm (.fromTextArea js/CodeMirror
-                                                     (dom/dom-node this)
-                                                     #js {:mode "clojure"
-                                                          :lineNumbers true
-                                                          :extraKeys #js {"Ctrl-Enter" (fn [_]
-                                                                                         (change-input (Code.) (.getValue @cm))
-                                                                                         (queue-recall-or-recompute-all))}
-                                                          :matchBrackets true}))
-                           (.on @cm "change" #(.. js/window.localStorage (setItem "preimp" (.getValue @cm)))))}))
+   {:render
+    (fn [] [:textarea
+            {:defaultValue ""
+             :auto-complete "off"}])
+    :component-did-mount
+    (fn [this]
+      (let [editor (.fromTextArea
+                    js/CodeMirror
+                    (dom/dom-node this)
+                    #js {:mode "clojure"
+                         :lineNumbers true
+                         :extraKeys #js {"Ctrl-Enter" (fn [_]
+                                                        (change-input (CellCode. cell-id) (.getValue (get @codemirrors cell-id))))}
+                         :matchBrackets true})]
+        (swap! codemirrors assoc cell-id editor)))}))
 
-(defn output-view []
+(defn output [cell-id]
   [:div
-   ^{:key :app} [:div (get-in @state [:id->value (Value. 'app)])]
-   #_[:div ":debug"
-      [:div (pr-str :recomputed) (doall (for [id (sort-by pr-str (@state :recomputed))] [:div [:span {:style {:font-weight "bold"}} (pr-str id)]]))]
-      [:div (pr-str :value)
-       (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
-                (let [color (if (instance? Error value) "red" "black")]
-                  [:div
-                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-                   " "
-                   [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
-                   " "
-                   (pr-str value)
-                   " "
-                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))]]])
+   (let [value (let [name (recall-or-recompute (CellParse. cell-id))]
+                 (if (instance? Error name) name
+                     (recall-or-recompute (Value. (:name name)))))]
+     (pr-str value))])
 
-(defn err-boundary
-  [& children]
-  (r/create-class
-   {:display-name "ErrBoundary"
-    :component-did-catch (fn [err info]
-                           (swap! state assoc :error [err info]))
-    :reagent-render (fn [& children]
-                      (if-let [err (get-in @state [:error])]
-                        [:pre [:code (pr-str err)]]
-                        (into [:<>] children)))}))
+(defn editor-and-output [cell-id]
+  [:div
+   [editor cell-id]
+   [output cell-id]])
+
+(defn debug []
+  [:div
+   [:div ":debug"
+    [:div (pr-str :value)
+     (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+              (let [color (if (instance? Error value) "red" "black")]
+                ^{:key (pr-str id)} [:div
+                                     [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+                                     " "
+                                     [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+                                     " "
+                                     (pr-str value)
+                                     " "
+                                     [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))]]])
 
 (defn app []
   [:div
-   [editor]
    [:div
-    [err-boundary [output-view]]]])
+    (for [cell-id (recall-or-recompute (CellIds.))]
+      ^{:key cell-id} [editor-and-output cell-id])
+    [:button
+     {:on-click #(do
+                   (change-input (CellIds.) (conj (recall-or-recompute (CellIds.)) @next-cell-id))
+                   (change-input (CellCode. @next-cell-id) "")
+                   (swap! next-cell-id inc))}
+     "+"]]
+   [debug]])
 
 (defn mount-root []
   (dom/render [app] (.getElementById js/document "app"))
   ;; for some reason eval fails if we run it during load
-  (js/setTimeout
-   (fn []
-     (change-input (Code.) (.getValue @cm))
-     (queue-recall-or-recompute-all))
-   1))
+  #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
 
 (defn init! []
   (mount-root))
