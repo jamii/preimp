@@ -160,20 +160,21 @@
 
 ;; --- state ---
 
-(def next-cell-id (atom 0))
+(def next-cell-id (atom 1))
 
 (def codemirrors (atom {}))
+(def codes (r/atom {}))
 
 (def state
   (r/atom {;; version increments on every change made from the outside
            :version 0
 
       ;; the last version at which this id was computed
-           :id->version {(CellIds.) 0}
+           :id->version {(CellIds.) 0 (CellCode. 0) 0}
 
       ;; the value when this id was last computed
       ;; (may be an Error)
-           :id->value {(CellIds.) []}
+           :id->value {(CellIds.) [0] (CellCode. 0) ""}
 
       ;; other id/value pairs that were used to compute this id
            :id->deps {}}))
@@ -193,6 +194,11 @@
      (not= dep-value (recall-or-recompute dep)))
    (get-in @state [:id->deps id])))
 
+(defn stale? [id]
+  (or (not (contains? (@state :id->value) id))
+      (and (not= (get-in @state [:id->version id]) (:version @state))
+           (deps-changed? id))))
+
 (defn recompute [id]
   (d :recompute id)
   (let [new-deps (atom {})
@@ -211,10 +217,7 @@
     new-value))
 
 (defn recall-or-recompute [id]
-  (if
-   (or (not (contains? (@state :id->value) id))
-       (and (not= (get-in @state [:id->version id]) (:version @state))
-            (deps-changed? id)))
+  (if (stale? id)
     (recompute id)
     (do
       (swap! state assoc-in [:id->version id] (:version @state))
@@ -229,23 +232,56 @@
     (change-input (CellCode. cell-id) new-code)
     (change-input (Value. name) new-value)))
 
+(defn update-cell [cell-id]
+  (change-input (CellCode. cell-id) (.getValue (get @codemirrors cell-id))))
+
+(defn insert-cell-at [ix]
+  (let [cell-ids (recall-or-recompute (CellIds.))
+        new-cell-ids (apply conj (subvec cell-ids 0 ix) @next-cell-id (subvec cell-ids ix))]
+    (change-input (CellIds.) new-cell-ids)
+    (change-input (CellCode. @next-cell-id) "")
+    (swap! next-cell-id inc)))
+
+(defn insert-cell [before-or-after near-cell-id]
+  (let [cell-ids (recall-or-recompute (CellIds.))
+        near-ix (.indexOf cell-ids near-cell-id)]
+    (insert-cell-at (case before-or-after :before near-ix :after (inc near-ix)))))
+
+(defn remove-cell [cell-id]
+  (let [cell-ids (recall-or-recompute (CellIds.))
+        ix (.indexOf cell-ids cell-id)
+        new-cell-ids (apply conj (subvec cell-ids 0 ix) (subvec cell-ids (inc ix)))]
+    (change-input (CellIds.) new-cell-ids)
+    (when (empty? new-cell-ids)
+      (insert-cell-at 0))
+    (.focus (@codemirrors ((recall-or-recompute (CellIds.)) (if (= ix 0) 0 (dec ix)))))))
+
 (defn editor [cell-id]
   (r/create-class
    {:render
-    (fn [] [:textarea
-            {:defaultValue ""
-             :auto-complete "off"}])
+    (fn [] [:textarea])
     :component-did-mount
     (fn [this]
-      (let [editor (.fromTextArea
-                    js/CodeMirror
-                    (dom/dom-node this)
-                    #js {:mode "clojure"
-                         :lineNumbers true
-                         :extraKeys #js {"Ctrl-Enter" (fn [_]
-                                                        (change-input (CellCode. cell-id) (.getValue (get @codemirrors cell-id))))}
-                         :matchBrackets true})]
-        (swap! codemirrors assoc cell-id editor)))}))
+      (let [codemirror (.fromTextArea
+                        js/CodeMirror
+                        (dom/dom-node this)
+                        #js {:mode "clojure"
+                             :lineNumbers false
+                             :extraKeys #js {"Ctrl-Enter" (fn [_] (update-cell cell-id))
+                                             "Shift-Enter" (fn [_]
+                                                             (insert-cell :after cell-id)
+                                                             (update-cell cell-id))
+                                             "Shift-Alt-Enter" (fn [_]
+                                                                 (insert-cell :before cell-id)
+                                                                 (update-cell cell-id))
+                                             "Ctrl-Backspace" (fn [_] (remove-cell cell-id))}
+                             :matchBrackets true
+                             :autofocus true
+                             :viewportMargin js/Infinity})]
+        (swap! codes assoc cell-id "")
+        (.on codemirror "changes" (fn [_] (swap! codes assoc cell-id (.getValue codemirror))))
+        (.on codemirror "blur" (fn [_] (update-cell cell-id)))
+        (swap! codemirrors assoc cell-id codemirror)))}))
 
 (defn output [cell-id]
   [:div
@@ -256,35 +292,29 @@
 
 (defn editor-and-output [cell-id]
   [:div
-   [editor cell-id]
+   [:div
+    {:style {:border (if (= (@codes cell-id) (recall-or-recompute (CellCode. cell-id))) "1px solid #eee" "1px solid #bbb")}}
+    [editor cell-id]]
    [output cell-id]])
 
 (defn debug []
   [:div
-   [:div ":debug"
-    [:div (pr-str :value)
-     (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
-              (let [color (if (instance? Error value) "red" "black")]
-                ^{:key (pr-str id)} [:div
-                                     [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-                                     " "
-                                     [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
-                                     " "
-                                     (pr-str value)
-                                     " "
-                                     [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))]]])
+   [:hr {:style {:margin "2rem"}}]
+   (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+            (let [color (if (instance? Error value) "red" "black")]
+              ^{:key (pr-str id)} [:div
+                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+                                   " "
+                                   [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+                                   " "
+                                   (pr-str value)
+                                   " "
+                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
 
 (defn app []
   [:div
-   [:div
-    (for [cell-id (recall-or-recompute (CellIds.))]
-      ^{:key cell-id} [editor-and-output cell-id])
-    [:button
-     {:on-click #(do
-                   (change-input (CellIds.) (conj (recall-or-recompute (CellIds.)) @next-cell-id))
-                   (change-input (CellCode. @next-cell-id) "")
-                   (swap! next-cell-id inc))}
-     "+"]]
+   [:div (for [cell-id (recall-or-recompute (CellIds.))]
+           ^{:key cell-id} [editor-and-output cell-id])]
    [debug]])
 
 (defn mount-root []

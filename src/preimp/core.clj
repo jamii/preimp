@@ -15,6 +15,7 @@
    [:body
     [:div#app "loading..."]
     (include-css "cljsjs/codemirror/development/codemirror.css")
+    [:style ".CodeMirror {height: auto;}"]
     (include-js "out/main.js")]))
 
 (defn handler [_request]
