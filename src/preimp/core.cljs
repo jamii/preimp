@@ -295,7 +295,8 @@
    [:div
     {:style {:border (if (= (@codes cell-id) (recall-or-recompute (CellCode. cell-id))) "1px solid #eee" "1px solid #bbb")}}
     [editor cell-id]]
-   [output cell-id]])
+   [output cell-id]
+   [:div {:style {:padding "1rem"}}]])
 
 (defn debug []
   [:div
