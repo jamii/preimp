@@ -133,9 +133,12 @@
 (defrecord Value [name]
   Incremental
   (compute* [this compute]
-    (let [thunk (compute (Thunk. name))
-          args (for [arg (:args thunk)] (compute (Value. arg)))]
-      (apply (:thunk thunk) args))))
+    (let [def (compute (Def. name))]
+      (if (= 'defs (:kind def))
+        (-> def :body last)
+        (let [thunk (compute (Thunk. name))
+              args (for [arg (:args thunk)] (compute (Value. arg)))]
+          (apply (:thunk thunk) args))))))
 
 ;; --- state ---
 
@@ -207,9 +210,12 @@
   (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
         old-value (recall-or-recompute (Value. name))
         new-value (apply f old-value args)
-        new-code (pr-str `(~'defs ~name ~new-value))]
+        form `(~'defs ~name ~new-value)
+        new-code (pr-str form)]
     (.setValue (get @codemirrors cell-id) new-code)
     (change-input (CellCode. cell-id) new-code)
+    ; avoid reparsing
+    (change-input (CellParse. cell-id) {:cell-id cell-id :form form :kind 'defs :name name :body `(~new-value)})
     new-value))
 
 (defn update-cell [cell-id]
