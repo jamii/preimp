@@ -315,11 +315,12 @@
   (d :connecting)
   (when-let [old-websocket @websocket]
     (.close old-websocket))
-  (swap! websocket (js/WebSocket. (str "ws://" js/location.host "/")))
+  (reset! websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
   (set! (.-onclose @websocket) connect)
   (set! (.-onerror @websocket) connect))
 
 (defn init! []
+  (connect)
   (insert-cell-at 0)
   (mount-root))
 
