@@ -31,27 +31,6 @@
 (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
 (cljs.js/load-analysis-cache! eval-state 'preimp.core (analyzer-state 'preimp.core))
 
-;; TODO I think the meta for end-col from tools.reader is accurate, so don't need to parse for end-ix
-(defn line-col->ix [line-col code]
-  (let [lines (clojure.string/split code "\n")
-        start-ix (+ (reduce + (map #(inc (count %)) (take (dec (:line line-col)) lines))) (dec (:column line-col)))
-        end-ix (loop [ix start-ix
-                      open-parens 0]
-                 (if (or (and (not= ix start-ix) (= open-parens 0)) (= ix (count code)))
-                   ix
-                   (let [open-parens (case (get code ix)
-                                       "(" (inc open-parens)
-                                       ")" (dec open-parens)
-                                       open-parens)]
-                     (recur (inc ix) open-parens))))]
-    [start-ix end-ix]))
-
-(defn replace-defs [line-col name code new-value]
-  (let [[start-ix end-ix] (line-col->ix line-col code)]
-    (str (subs code 0 start-ix)
-         (pr-str `(~'defs ~name ~new-value))
-         (subs code end-ix))))
-
 ;; TODO this doesn't handle shadowing global names
 (defn names-into! [form names]
   (cond
