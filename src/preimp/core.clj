@@ -1,5 +1,6 @@
 (ns preimp.core
   (:require
+   [ring.adapter.jetty9 :as jetty]
    [cljs.env]
    [hiccup.page :refer [include-js include-css html5]]
    [ring.middleware.file :refer [wrap-file]]
@@ -18,10 +19,20 @@
     [:style ".CodeMirror {height: auto;}"]
     (include-js "out/main.js")]))
 
-(defn handler [_request]
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body page})
+(def ws-handler {:on-connect (fn [ws] (prn :ok))
+                 :on-error (fn [ws e])
+                 :on-close (fn [ws status-code reason])
+                 :on-text (fn [ws text-message])
+                 :on-bytes (fn [ws bytes offset len])
+                 :on-ping (fn [ws bytebuffer])
+                 :on-pong (fn [ws bytebuffer])})
+
+(defn handler [request]
+  (if (jetty/ws-upgrade-request? request)
+    (jetty/ws-upgrade-response ws-handler)
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body page}))
 
 (def app
   (-> handler

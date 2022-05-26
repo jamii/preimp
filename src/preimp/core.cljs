@@ -309,6 +309,16 @@
   ;; for some reason eval fails if we run it during load
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
 
+(def websocket (atom nil))
+
+(defn connect []
+  (d :connecting)
+  (when-let [old-websocket @websocket]
+    (.close old-websocket))
+  (swap! websocket (js/WebSocket. (str "ws://" js/location.host "/")))
+  (set! (.-onclose @websocket) connect)
+  (set! (.-onerror @websocket) connect))
+
 (defn init! []
   (insert-cell-at 0)
   (mount-root))
