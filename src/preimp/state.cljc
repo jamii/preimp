@@ -16,35 +16,33 @@
   (conj ops
         (InsertOp. (next-version ops) client cell-id prev-cell-id)))
 
-(defn delete-cell [ops client cell-id]
+(defn remove-cell [ops client cell-id]
   (conj ops
         (DeleteOp. (next-version ops) client cell-id)))
 
 (defn assoc-cell [ops client cell-id new-code]
   (conj ops
-        (InsertOp. (next-version ops) client new-code cell-id)))
+        (AssocOp. (next-version ops) client cell-id new-code)))
 
 (defn ops->state [ops]
-  (let [inserted (set (for [op ops :when (instance? InsertOp op)] (:cell-id op)))
-        deleted (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
+  (let [removed (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
+        inserted (set (for [op ops :when (instance? InsertOp op) :when (not (removed (:cell-id op)))] (:cell-id op)))
         sorted-ops (sort-by (fn [op] [(:version op) (:client op)]) ops)
-        cell-ids (reduce
-                  (fn [cell-ids op]
-                    (if (and
-                         (instance? InsertOp op)
-                         (not (deleted (:cell-id op))))
-                      (let [ix (if (:prev-cell-id op)
-                                 (inc (.indexOf cell-ids (:prev-cell-id op))) 0)]
-                        (apply conj (subvec cell-ids 0 ix) (:cell-id op) (subvec cell-ids ix)))
-                      cell-ids))
-                  []
-                  sorted-ops)
+        all-cell-ids (reduce
+                      (fn [cell-ids op]
+                        (if (instance? InsertOp op)
+                          (let [ix (if (:prev-cell-id op)
+                                     (inc (.indexOf cell-ids (:prev-cell-id op))) 0)]
+                            (apply conj (subvec cell-ids 0 ix) (:cell-id op) (subvec cell-ids ix)))
+                          cell-ids))
+                      []
+                      sorted-ops)
+        cell-ids (into [] (filter inserted all-cell-ids))
         cell-codes (reduce
                     (fn [state op]
                       (if (and
                            (instance? AssocOp op)
-                           (inserted (:cell-id op))
-                           (not (deleted (:cell-id op))))
+                           (inserted (:cell-id op)))
                         (assoc state (:cell-id op) (:code op))
                         state))
                     (into {} (for [cell-id inserted] [cell-id ""]))
@@ -83,4 +81,22 @@
             (AssocOp. 1 "b" "x" "bx1")
             (AssocOp. 2 "a" "x" "ax2")})
          {:cell-ids ["x"]
-          :cell-codes {"x" "ax2"}})))
+          :cell-codes {"x" "ax2"}}))
+  (is (= (ops->state
+          #{(InsertOp. 0 "a" "x" nil)
+            (InsertOp. 1 "a" "y" "x")
+            (InsertOp. 2 "a" "z" "x")
+            (AssocOp. 3 "a" "x" "ax3")
+            (AssocOp. 4 "a" "y" "ay4")
+            (DeleteOp. 5 "a" "x")})
+         {:cell-ids ["z" "y"]
+          :cell-codes {"y" "ay4"
+                       "z" ""}}))
+  (is (= (ops->state
+          #{(InsertOp. 0 "a" "x" nil)
+            (InsertOp. 1 "a" "y" "x")
+            (InsertOp. 2 "a" "z" "y")
+            (DeleteOp. 3 "a" "y")})
+         {:cell-ids ["x" "z"]
+          :cell-codes {"x" ""
+                       "z" ""}})))

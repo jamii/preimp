@@ -9,7 +9,8 @@
    [reagent.core :as r]
    [cljs.js :refer [empty-state eval-str js-eval]]
    [cljs.pprint :refer [pprint]]
-   [cljs.reader :refer [read-string]]))
+   [cljs.reader :refer [read-string]]
+   preimp.state))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -45,9 +46,22 @@
 (defprotocol Incremental
   (compute* [this compute]))
 
-(defrecord CellIds [])
+(defrecord Ops [])
 
-(defrecord CellCode [id])
+(defrecord State []
+  Incremental
+  (compute* [this compute]
+    (preimp.state/ops->state (compute (Ops.)))))
+
+(defrecord CellIds []
+  Incremental
+  (compute* [this compute]
+    (:cell-ids (compute (State.)))))
+
+(defrecord CellCode [id]
+  Incremental
+  (compute* [this compute]
+    (get-in (compute (State.)) [:cell-codes id])))
 
 (defrecord CellParse [id]
   Incremental
@@ -145,16 +159,18 @@
 (def codemirrors (atom {}))
 (def codes (r/atom {}))
 
+(def client (random-uuid))
+
 (def state
   (r/atom {;; version increments on every change made from the outside
            :version 0
 
       ;; the last version at which this id was computed
-           :id->version {(CellIds.) 0}
+           :id->version {(Ops.) 0}
 
       ;; the value when this id was last computed
       ;; (may be an Error)
-           :id->value {(CellIds.) []}
+           :id->value {(Ops.) #{}}
 
       ;; other id/value pairs that were used to compute this id
            :id->deps {}}))
@@ -210,37 +226,35 @@
   (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
         old-value (recall-or-recompute (Value. name))
         new-value (apply f old-value args)
-        form `(~'defs ~name ~new-value)
-        new-code (pr-str form)]
+        new-code (pr-str `(~'defs ~name ~new-value))
+        old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
     (.setValue (get @codemirrors cell-id) new-code)
-    (change-input (CellCode. cell-id) new-code)
-    ; avoid reparsing
-    (change-input (CellParse. cell-id) {:cell-id cell-id :form form :kind 'defs :name name :body `(~new-value)})
+    (change-input (Ops.) new-ops)
     new-value))
 
 (defn update-cell [cell-id]
-  (change-input (CellCode. cell-id) (.getValue (get @codemirrors cell-id))))
+  (let [new-value (.getValue (get @codemirrors cell-id))
+        old-ops (d :old-ops (recall-or-recompute (Ops.)))
+        new-ops (d :new-ops (preimp.state/assoc-cell old-ops client cell-id new-value))]
+    (change-input (Ops.) new-ops)))
 
-(defn insert-cell-at [ix]
-  (let [cell-ids (recall-or-recompute (CellIds.))
-        new-cell-id (random-uuid)
-        new-cell-ids (apply conj (subvec cell-ids 0 ix) new-cell-id (subvec cell-ids ix))]
-    (change-input (CellIds.) new-cell-ids)
-    (change-input (CellCode. new-cell-id) "")))
+(defn insert-cell-after [prev-cell-id]
+  (let [new-cell-id (random-uuid)
+        old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/insert-cell old-ops client new-cell-id prev-cell-id)]
+    (change-input (Ops.) new-ops)))
 
-(defn insert-cell [before-or-after near-cell-id]
+(defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
-        near-ix (.indexOf cell-ids near-cell-id)]
-    (insert-cell-at (case before-or-after :before near-ix :after (inc near-ix)))))
+        next-ix (.indexOf cell-ids next-cell-id)
+        prev-cell-id (if (= next-ix 0) nil (get cell-ids (dec next-ix)))]
+    (insert-cell-after prev-cell-id)))
 
 (defn remove-cell [cell-id]
-  (let [cell-ids (recall-or-recompute (CellIds.))
-        ix (.indexOf cell-ids cell-id)
-        new-cell-ids (apply conj (subvec cell-ids 0 ix) (subvec cell-ids (inc ix)))]
-    (change-input (CellIds.) new-cell-ids)
-    (when (empty? new-cell-ids)
-      (insert-cell-at 0))
-    (.focus (@codemirrors ((recall-or-recompute (CellIds.)) (if (= ix 0) 0 (dec ix)))))))
+  (let [old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/remove-cell old-ops client cell-id)]
+    (change-input (Ops.) new-ops)))
 
 (defn editor [cell-id]
   (r/create-class
@@ -255,10 +269,10 @@
                              :lineNumbers false
                              :extraKeys #js {"Ctrl-Enter" (fn [_] (update-cell cell-id))
                                              "Shift-Enter" (fn [_]
-                                                             (insert-cell :after cell-id)
+                                                             (insert-cell-after cell-id)
                                                              (update-cell cell-id))
                                              "Shift-Alt-Enter" (fn [_]
-                                                                 (insert-cell :before cell-id)
+                                                                 (insert-cell-before cell-id)
                                                                  (update-cell cell-id))
                                              "Ctrl-Backspace" (fn [_] (remove-cell cell-id))}
                              :matchBrackets true
@@ -321,7 +335,7 @@
 
 (defn init! []
   (connect)
-  (insert-cell-at 0)
+  (insert-cell-after nil)
   (mount-root))
 
 (init!)
