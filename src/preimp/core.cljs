@@ -189,17 +189,19 @@
 (defn deps-changed? [id]
   (some
    (fn [[dep dep-value]]
-     (not= dep-value (recall-or-recompute dep)))
+     (not= (recall-or-recompute dep) dep-value))
    (get-in @state [:id->deps id])))
 
 (defn stale? [id]
-  (or (not (contains? (@state :id->value) id))
-      (and (not= (get-in @state [:id->version id]) (:version @state))
-           (deps-changed? id))))
+  (or
+   (not (contains? (@state :id->value) id))
+   (and (not= (get-in @state [:id->version id]) (:version @state))
+        (deps-changed? id))))
 
 (defn recompute [id]
   (d :recompute id)
-  (let [new-deps (atom {})
+  (let [old-value (get-in @state [:id->value id])
+        new-deps (atom {})
         new-value (try
                     (compute* id (fn [id]
                                    (let [value (recall-or-recompute id)]
@@ -209,9 +211,10 @@
                                        value))))
                     (catch :default error
                       (Error. error)))]
-    (swap! state update-in [:id->version] assoc id (@state :version))
-    (swap! state update-in [:id->value] assoc id new-value)
-    (swap! state update-in [:id->deps] assoc id @new-deps)
+    (swap! state assoc-in [:id->version id] (:version @state))
+    (when (not= old-value new-value)
+      (swap! state assoc-in [:id->value id] new-value))
+    (swap! state assoc-in [:id->deps id] @new-deps)
     new-value))
 
 (defn recall-or-recompute [id]
@@ -228,8 +231,6 @@
         new-code (pr-str `(~'defs ~name ~new-value))]
     (.setValue (get @codemirrors cell-id) new-code)
     (change-input (CellCode. cell-id) new-code)
-    ;TODO avoid recomputing this
-    ;(change-input (Value. name) new-value)
     new-value))
 
 (defn update-cell [cell-id]
