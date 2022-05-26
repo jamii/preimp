@@ -1,4 +1,5 @@
 {:deps {ring/ring {:mvn/version "1.9.5"}
+        info.sunng/ring-jetty9-adapter {:mvn/version "0.17.6"}
         org.clojure/clojurescript {:mvn/version "1.11.4"}
         cljsjs/codemirror {:mvn/version "5.44.0-1"}
         cljsjs/react {:mvn/version "17.0.2-0"}

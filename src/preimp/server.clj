@@ -1,7 +1,7 @@
 (ns preimp.server
   (:require
    [preimp.core :refer [app]]
-   [ring.adapter.jetty :refer [run-jetty]])
+   [ring.adapter.jetty9 :refer [run-jetty]])
   (:gen-class))
 
 (defn -main [& args]
