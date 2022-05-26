@@ -292,9 +292,9 @@
               ^{:key (pr-str id)} [:div
                                    [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
                                    " "
-                                   [:span {:style {:font-weight "bold" :color color}} (pr-str id)]
+                                   [:span {:style {:font-weight "bold"}} (pr-str id)]
                                    " "
-                                   (pr-str value)
+                                   [:span {:style {:color color}} (pr-str value)]
                                    " "
                                    [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
 
