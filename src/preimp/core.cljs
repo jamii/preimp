@@ -160,8 +160,6 @@
 
 ;; --- state ---
 
-(def next-cell-id (atom 1))
-
 (def codemirrors (atom {}))
 (def codes (r/atom {}))
 
@@ -170,11 +168,11 @@
            :version 0
 
       ;; the last version at which this id was computed
-           :id->version {(CellIds.) 0 (CellCode. 0) 0}
+           :id->version {(CellIds.) 0}
 
       ;; the value when this id was last computed
       ;; (may be an Error)
-           :id->value {(CellIds.) [0] (CellCode. 0) ""}
+           :id->value {(CellIds.) []}
 
       ;; other id/value pairs that were used to compute this id
            :id->deps {}}))
@@ -230,17 +228,19 @@
         new-code (pr-str `(~'defs ~name ~new-value))]
     (.setValue (get @codemirrors cell-id) new-code)
     (change-input (CellCode. cell-id) new-code)
-    (change-input (Value. name) new-value)))
+    ;TODO avoid recomputing this
+    ;(change-input (Value. name) new-value)
+    new-value))
 
 (defn update-cell [cell-id]
   (change-input (CellCode. cell-id) (.getValue (get @codemirrors cell-id))))
 
 (defn insert-cell-at [ix]
   (let [cell-ids (recall-or-recompute (CellIds.))
-        new-cell-ids (apply conj (subvec cell-ids 0 ix) @next-cell-id (subvec cell-ids ix))]
+        new-cell-id (random-uuid)
+        new-cell-ids (apply conj (subvec cell-ids 0 ix) new-cell-id (subvec cell-ids ix))]
     (change-input (CellIds.) new-cell-ids)
-    (change-input (CellCode. @next-cell-id) "")
-    (swap! next-cell-id inc)))
+    (change-input (CellCode. new-cell-id) "")))
 
 (defn insert-cell [before-or-after near-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -324,6 +324,7 @@
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
 
 (defn init! []
+  (insert-cell-at 0)
   (mount-root))
 
 (init!)
