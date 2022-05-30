@@ -10,7 +10,8 @@
    [cljs.js :refer [empty-state eval-str js-eval]]
    [cljs.pprint :refer [pprint]]
    [cljs.reader :refer [read-string]]
-   preimp.state))
+   preimp.state
+   clojure.edn))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -158,6 +159,7 @@
 
 (def codemirrors (atom {}))
 (def codes (r/atom {}))
+(def websocket (atom nil))
 
 (def client (random-uuid))
 
@@ -177,10 +179,20 @@
 
 (defrecord Error [error])
 
+(declare recall-or-recompute)
+
+(defn send-ops []
+  (d :sending (count (recall-or-recompute (Ops.))))
+  (try
+    (.send @websocket (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
+    (catch :default error (d :ws-send-error error))))
+
 (defn change-input [id value]
   (swap! state update-in [:version] inc)
   (swap! state assoc-in [:id->version id] (:version @state))
-  (swap! state assoc-in [:id->value id] value))
+  (swap! state assoc-in [:id->value id] value)
+  (when (instance? Ops id)
+    (send-ops)))
 
 (declare recall-or-recompute)
 
@@ -197,7 +209,7 @@
         (deps-changed? id))))
 
 (defn recompute [id]
-  (d :recompute id)
+  ;(d :recompute id)
   (let [old-value (get-in @state [:id->value id])
         new-deps (atom {})
         new-value (try
@@ -235,8 +247,8 @@
 
 (defn update-cell [cell-id]
   (let [new-value (.getValue (get @codemirrors cell-id))
-        old-ops (d :old-ops (recall-or-recompute (Ops.)))
-        new-ops (d :new-ops (preimp.state/assoc-cell old-ops client cell-id new-value))]
+        old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/assoc-cell old-ops client cell-id new-value)]
     (change-input (Ops.) new-ops)))
 
 (defn insert-cell-after [prev-cell-id]
@@ -262,10 +274,12 @@
     (fn [] [:textarea])
     :component-did-mount
     (fn [this]
-      (let [codemirror (.fromTextArea
+      (let [value (recall-or-recompute (CellCode. cell-id))
+            codemirror (.fromTextArea
                         js/CodeMirror
                         (dom/dom-node this)
-                        #js {:mode "clojure"
+                        #js {:value value
+                             :mode "clojure"
                              :lineNumbers false
                              :extraKeys #js {"Ctrl-Enter" (fn [_] (update-cell cell-id))
                                              "Shift-Enter" (fn [_]
@@ -278,10 +292,16 @@
                              :matchBrackets true
                              :autofocus true
                              :viewportMargin js/Infinity})]
-        (swap! codes assoc cell-id "")
+        (swap! codes assoc cell-id value)
         (.on codemirror "changes" (fn [_] (swap! codes assoc cell-id (.getValue codemirror))))
         (.on codemirror "blur" (fn [_] (update-cell cell-id)))
         (swap! codemirrors assoc cell-id codemirror)))}))
+
+(defn update-codemirrors []
+  (doseq [cell-id (recall-or-recompute (CellIds.))
+          :let [cell-code (recall-or-recompute (CellCode. cell-id))]]
+    (when (= cell-code (@codes cell-id))
+      (.setValue (@codemirrors cell-id) cell-code))))
 
 (defn output [cell-id]
   [:div
@@ -323,19 +343,36 @@
   ;; for some reason eval fails if we run it during load
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
 
-(def websocket (atom nil))
+(def connect-retry-timeout (atom 100))
 
 (defn connect []
   (d :connecting)
-  (when-let [old-websocket @websocket]
-    (.close old-websocket))
+  (swap! connect-retry-timeout * 2)
   (reset! websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
-  (set! (.-onclose @websocket) connect)
-  (set! (.-onerror @websocket) connect))
+  (set! (.-onopen @websocket) (fn [_]
+                                (reset! connect-retry-timeout 100)
+                                (send-ops)))
+  (set! (.-onmessage @websocket) (fn [event]
+                                   (let [old-ops (recall-or-recompute (Ops.))
+                                         server-ops
+                                         (clojure.edn/read-string
+                                          {:readers {'preimp.state.InsertOp preimp.state/map->InsertOp
+                                                     'preimp.state.DeleteOp preimp.state/map->DeleteOp
+                                                     'preimp.state.AssocOp preimp.state/map->AssocOp}}
+                                          (.-data event))
+                                         _ (d :receiving (count server-ops))
+                                         new-ops (clojure.set/union old-ops server-ops)]
+                                     (when (not= old-ops new-ops)
+                                       (change-input (Ops.) new-ops)
+                                       (update-codemirrors)))))
+  (set! (.-onerror @websocket) (fn [error]
+                                 (d :ws-error error)
+                                 (.close @websocket)))
+  (set! (.-onclose @websocket) (fn []
+                                 (js/setTimeout connect @connect-retry-timeout))))
 
 (defn init! []
   (connect)
-  (insert-cell-after nil)
   (mount-root))
 
 (init!)
