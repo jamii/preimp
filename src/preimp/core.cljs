@@ -158,7 +158,8 @@
 ;; --- state ---
 
 (def codemirrors (atom {}))
-(def codes (r/atom {}))
+(def code-at-focus (r/atom {}))
+(def code-now (r/atom {}))
 (def websocket (atom nil))
 
 (def client (random-uuid))
@@ -251,10 +252,13 @@
         new-ops (preimp.state/assoc-cell old-ops client cell-id new-value)]
     (change-input (Ops.) new-ops)))
 
+(def last-inserted (atom nil))
+
 (defn insert-cell-after [prev-cell-id]
   (let [new-cell-id (random-uuid)
         old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/insert-cell old-ops client new-cell-id prev-cell-id)]
+    (reset! last-inserted new-cell-id)
     (change-input (Ops.) new-ops)))
 
 (defn insert-cell-before [next-cell-id]
@@ -278,8 +282,7 @@
             codemirror (.fromTextArea
                         js/CodeMirror
                         (dom/dom-node this)
-                        #js {:value value
-                             :mode "clojure"
+                        #js {:mode "clojure"
                              :lineNumbers false
                              :extraKeys #js {"Ctrl-Enter" (fn [_] (update-cell cell-id))
                                              "Shift-Enter" (fn [_]
@@ -290,18 +293,27 @@
                                                                  (update-cell cell-id))
                                              "Ctrl-Backspace" (fn [_] (remove-cell cell-id))}
                              :matchBrackets true
-                             :autofocus true
+                             :autofocus (= cell-id @last-inserted)
                              :viewportMargin js/Infinity})]
-        (swap! codes assoc cell-id value)
-        (.on codemirror "changes" (fn [_] (swap! codes assoc cell-id (.getValue codemirror))))
-        (.on codemirror "blur" (fn [_] (update-cell cell-id)))
-        (swap! codemirrors assoc cell-id codemirror)))}))
+        (.on codemirror "changes" (fn [_]
+                                    (swap! code-now assoc cell-id (.getValue codemirror))))
+        (.on codemirror "blur" (fn [_]
+                                 (when (not= (@code-now cell-id) (@code-at-focus cell-id))
+                                   (swap! code-at-focus assoc cell-id (.getValue codemirror))
+                                   (update-cell cell-id))))
+        (.on codemirror "focus" (fn [_]
+                                  (swap! code-at-focus assoc cell-id (.getValue codemirror))))
+        (swap! codemirrors assoc cell-id codemirror)
+        (swap! code-at-focus assoc cell-id value)
+        (swap! code-now assoc cell-id value)
+        (.setValue codemirror value)))}))
 
 (defn update-codemirrors []
   (doseq [cell-id (recall-or-recompute (CellIds.))
           :let [cell-code (recall-or-recompute (CellCode. cell-id))]]
-    (when (= cell-code (@codes cell-id))
-      (.setValue (@codemirrors cell-id) cell-code))))
+    (when-let [code-mirror (@codemirrors cell-id)]
+      (when (= (@code-at-focus cell-id) (@code-now cell-id))
+        (.setValue code-mirror cell-code)))))
 
 (defn output [cell-id]
   [:div
@@ -313,7 +325,7 @@
 (defn editor-and-output [cell-id]
   [:div
    [:div
-    {:style {:border (if (= (@codes cell-id) (recall-or-recompute (CellCode. cell-id))) "1px solid #eee" "1px solid #bbb")}}
+    {:style {:border (if (= (@code-at-focus cell-id) (@code-now cell-id)) "1px solid #eee" "1px solid #bbb")}}
     [editor cell-id]]
    [output cell-id]
    [:div {:style {:padding "1rem"}}]])
