@@ -13,7 +13,42 @@
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
-;; --- util ---
+;; --- state ---
+
+(defrecord Ops [])
+
+(def codemirrors (atom {}))
+(def code-at-focus (r/atom {}))
+(def code-now (r/atom {}))
+(def websocket (atom nil))
+
+(def client (random-uuid))
+
+(def gui-state
+  (r/atom {;; version increments on every change made from the outside
+           :version 0
+
+      ;; the last version at which this id was computed
+           :id->version {(Ops.) 0}
+
+      ;; the value when this id was last computed
+      ;; (may be an Error)
+           :id->value {(Ops.) #{}}
+
+      ;; other id/value pairs that were used to compute this id
+           :id->deps {}}))
+
+(def connect-retry-timeout (atom 100))
+
+(def last-inserted (atom nil))
+
+(defrecord Error [error])
+
+;; --- compiler stuff ---
+
+(def eval-state (empty-state))
+(cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
+(cljs.js/load-analysis-cache! eval-state 'preimp.core (analyzer-state 'preimp.core))
 
 (def eval-config
   {:eval js-eval
@@ -22,14 +57,10 @@
 
 (defn eval-form [state form]
   (let [result (atom nil)]
-    (cljs.js/eval state `(let [~'edit! ~'preimp.core/edit!] ~form) eval-config #(reset! result %))
+    (cljs.js/eval eval-state `(let [~'edit! ~'preimp.core/edit!] ~form) eval-config #(reset! result %))
     ;; while eval can be async, it usually isn't
     (assert @result)
     @result))
-
-(def eval-state (empty-state))
-(cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
-(cljs.js/load-analysis-cache! eval-state 'preimp.core (analyzer-state 'preimp.core))
 
 ;; TODO this doesn't handle shadowing global names
 (defn names-into! [form names]
@@ -40,12 +71,52 @@
     (symbol? form)
     (swap! names conj form)))
 
-;; --- incr ---
+;; --- incremental core ---
 
 (defprotocol Incremental
   (compute* [this compute]))
 
-(defrecord Ops [])
+(declare recall-or-recompute)
+
+(defn deps-changed? [id]
+  (some
+   (fn [[dep dep-value]]
+     (not= (recall-or-recompute dep) dep-value))
+   (get-in @gui-state [:id->deps id])))
+
+(defn stale? [id]
+  (or
+   (not (contains? (@gui-state :id->value) id))
+   (and (not= (get-in @gui-state [:id->version id]) (:version @gui-state))
+        (deps-changed? id))))
+
+(defn recompute [id]
+  ;(d :recompute id)
+  (let [old-value (get-in @gui-state [:id->value id])
+        new-deps (atom {})
+        new-value (try
+                    (compute* id (fn [id]
+                                   (let [value (recall-or-recompute id)]
+                                     (swap! new-deps assoc id value)
+                                     (if (instance? Error value)
+                                       (throw (:error value))
+                                       value))))
+                    (catch :default error
+                      (Error. error)))]
+    (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
+    (when (not= old-value new-value)
+      (swap! gui-state assoc-in [:id->value id] new-value))
+    (swap! gui-state assoc-in [:id->deps id] @new-deps)
+    new-value))
+
+(defn recall-or-recompute [id]
+  (if (stale? id)
+    (recompute id)
+    (do
+      (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
+      (get-in @gui-state [:id->value id]))))
+
+;; --- incremental nodes ---
 
 (defrecord State []
   Incremental
@@ -153,85 +224,14 @@
               args (for [arg (:args thunk)] (compute (Value. arg)))]
           (apply (:thunk thunk) args))))))
 
-;; --- state ---
-
-(def codemirrors (atom {}))
-(def code-at-focus (r/atom {}))
-(def code-now (r/atom {}))
-(def websocket (atom nil))
-
-(def client (random-uuid))
-
-(def state
-  (r/atom {;; version increments on every change made from the outside
-           :version 0
-
-      ;; the last version at which this id was computed
-           :id->version {(Ops.) 0}
-
-      ;; the value when this id was last computed
-      ;; (may be an Error)
-           :id->value {(Ops.) #{}}
-
-      ;; other id/value pairs that were used to compute this id
-           :id->deps {}}))
-
-(defrecord Error [error])
-
-(declare recall-or-recompute)
-
-(defn send-ops []
-  (d :sending (count (recall-or-recompute (Ops.))))
-  (try
-    (.send @websocket (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
-    (catch :default error (d :ws-send-error error))))
+(declare send-ops)
 
 (defn change-input [id value]
-  (swap! state update-in [:version] inc)
-  (swap! state assoc-in [:id->version id] (:version @state))
-  (swap! state assoc-in [:id->value id] value)
+  (swap! gui-state update-in [:version] inc)
+  (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
+  (swap! gui-state assoc-in [:id->value id] value)
   (when (instance? Ops id)
     (send-ops)))
-
-(declare recall-or-recompute)
-
-(defn deps-changed? [id]
-  (some
-   (fn [[dep dep-value]]
-     (not= (recall-or-recompute dep) dep-value))
-   (get-in @state [:id->deps id])))
-
-(defn stale? [id]
-  (or
-   (not (contains? (@state :id->value) id))
-   (and (not= (get-in @state [:id->version id]) (:version @state))
-        (deps-changed? id))))
-
-(defn recompute [id]
-  ;(d :recompute id)
-  (let [old-value (get-in @state [:id->value id])
-        new-deps (atom {})
-        new-value (try
-                    (compute* id (fn [id]
-                                   (let [value (recall-or-recompute id)]
-                                     (swap! new-deps assoc id value)
-                                     (if (instance? Error value)
-                                       (throw (:error value))
-                                       value))))
-                    (catch :default error
-                      (Error. error)))]
-    (swap! state assoc-in [:id->version id] (:version @state))
-    (when (not= old-value new-value)
-      (swap! state assoc-in [:id->value id] new-value))
-    (swap! state assoc-in [:id->deps id] @new-deps)
-    new-value))
-
-(defn recall-or-recompute [id]
-  (if (stale? id)
-    (recompute id)
-    (do
-      (swap! state assoc-in [:id->version id] (:version @state))
-      (get-in @state [:id->value id]))))
 
 (defn edit! [name f & args]
   (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
@@ -250,8 +250,6 @@
         new-ops (preimp.state/assoc-cell old-ops client cell-id new-value)]
     (change-input (Ops.) new-ops)))
 
-(def last-inserted (atom nil))
-
 (defn insert-cell-after [prev-cell-id]
   (let [new-cell-id (random-uuid)
         old-ops (recall-or-recompute (Ops.))
@@ -269,6 +267,8 @@
   (let [old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/remove-cell old-ops client cell-id)]
     (change-input (Ops.) new-ops)))
+
+;; --- gui ---
 
 (defn editor [cell-id]
   (r/create-class
@@ -331,16 +331,16 @@
 (defn debug []
   [:div
    [:hr {:style {:margin "2rem"}}]
-   (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+   (doall (for [[id value] (sort-by #(pr-str (first %)) (@gui-state :id->value))]
             (let [color (if (instance? Error value) "red" "black")]
               ^{:key (pr-str id)} [:div
-                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @gui-state [:id->version id]))]
                                    " "
                                    [:span {:style {:font-weight "bold"}} (pr-str id)]
                                    " "
                                    [:span {:style {:color color}} (pr-str value)]
                                    " "
-                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
+                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @gui-state [:id->deps id]))))]])))])
 
 (defn app []
   [:div
@@ -353,7 +353,13 @@
   ;; for some reason eval fails if we run it during load
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
 
-(def connect-retry-timeout (atom 100))
+;; --- network ---
+
+(defn send-ops []
+  (d :sending (count (recall-or-recompute (Ops.))))
+  (try
+    (.send @websocket (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
+    (catch :default error (d :ws-send-error error))))
 
 (defn connect []
   (d :connecting)
@@ -378,6 +384,8 @@
                                  (.close @websocket)))
   (set! (.-onclose @websocket) (fn []
                                  (js/setTimeout connect @connect-retry-timeout))))
+
+;; --- init ---
 
 (defn init! []
   (connect)

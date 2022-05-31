@@ -7,10 +7,6 @@
    [ring.middleware.resource :refer [wrap-resource]]
    preimp.state))
 
-;; dump analyzer state for frontend
-(defmacro analyzer-state [[_ ns-sym]]
-  `'~(get-in @cljs.env/*compiler* [:cljs.analyzer/namespaces ns-sym]))
-
 ;; --- state ---
 
 (def state (atom
@@ -76,3 +72,9 @@
   (-> handler
       (wrap-file "public" {:allow-symlinks? true})
       (wrap-resource "")))
+
+;; --- misc ---
+
+;; dump analyzer state for frontend
+(defmacro analyzer-state [[_ ns-sym]]
+  `'~(get-in @cljs.env/*compiler* [:cljs.analyzer/namespaces ns-sym]))
