@@ -50,6 +50,11 @@
     {:cell-ids cell-ids
      :cell-codes cell-codes}))
 
+(def readers
+  {'preimp.state.InsertOp preimp.state/map->InsertOp
+   'preimp.state.DeleteOp preimp.state/map->DeleteOp
+   'preimp.state.AssocOp preimp.state/map->AssocOp})
+
 (deftest basic
   (is (= (ops->state #{})
          {:cell-ids []

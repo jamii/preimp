@@ -8,8 +8,6 @@
    [reagent.dom :as dom]
    [reagent.core :as r]
    [cljs.js :refer [empty-state eval-str js-eval]]
-   [cljs.pprint :refer [pprint]]
-   [cljs.reader :refer [read-string]]
    preimp.state
    clojure.edn))
 
@@ -368,9 +366,7 @@
                                    (let [old-ops (recall-or-recompute (Ops.))
                                          server-ops
                                          (clojure.edn/read-string
-                                          {:readers {'preimp.state.InsertOp preimp.state/map->InsertOp
-                                                     'preimp.state.DeleteOp preimp.state/map->DeleteOp
-                                                     'preimp.state.AssocOp preimp.state/map->AssocOp}}
+                                          {:readers preimp.state/readers}
                                           (.-data event))
                                          _ (d :receiving (count server-ops))
                                          new-ops (clojure.set/union old-ops server-ops)]
