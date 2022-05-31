@@ -1,4 +1,6 @@
 out
+target
 *.log
 .cpcache
 preimp.db
+secret.nix

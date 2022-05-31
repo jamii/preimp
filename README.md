@@ -1,6 +1,6 @@
 Prototyping interactions for [imp](https://github.com/jamii/imp) without getting bottlenecked on language design.
 
-Build:
+Build (dev):
 
 ``` bash
 clj -M --main cljs.main --compile preimp.core
@@ -21,4 +21,17 @@ Format:
 
 ``` bash
 clojure -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
+```
+
+Build (prod):
+
+```
+clj -T:build build/uber
+```
+
+Deploy:
+
+```
+nixops create -d preimp
+nixops deploy -d preimp
 ```
