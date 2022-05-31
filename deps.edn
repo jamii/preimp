@@ -5,4 +5,6 @@
         cljsjs/react {:mvn/version "17.0.2-0"}
         cljsjs/react-dom {:mvn/version "17.0.2-0"}
         reagent/reagent {:mvn/version "1.1.1"}
-        hiccup/hiccup {:mvn/version "1.0.5"}}}
+        hiccup/hiccup {:mvn/version "1.0.5"}
+        org.clojure/java.jdbc {:mvn/version "0.7.12"}
+        org.xerial/sqlite-jdbc {:mvn/version "3.36.0.3"}}}

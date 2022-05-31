@@ -1,9 +1,11 @@
 (ns preimp.server
   (:require
-   [preimp.core :refer [app]]
+   preimp.core
    [ring.adapter.jetty9 :refer [run-jetty]])
   (:gen-class))
 
 (defn -main [& args]
+  (preimp.core/init-db)
+  (preimp.core/read-ops)
   (let [port 3000]
-    (run-jetty #'app {:port port :join? false})))
+    (run-jetty #'preimp.core/app {:port port :join? false})))

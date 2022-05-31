@@ -5,15 +5,36 @@
    [hiccup.page :refer [include-js include-css html5]]
    [ring.middleware.file :refer [wrap-file]]
    [ring.middleware.resource :refer [wrap-resource]]
-   preimp.state))
+   preimp.state
+   [clojure.java.jdbc :as jdbc]))
 
 ;; --- state ---
 
-(def state (atom
-            {:ops (preimp.state/insert-cell #{} "root" (preimp.state/new-cell-id) nil)
-             :client->websocket {}}))
+(def state
+  (atom
+   {:ops #{}
+    :client->websocket {}}))
 
 ;; --- actions ---
+
+(def db
+  {:classname   "org.sqlite.JDBC"
+   :subprotocol "sqlite"
+   :subname     "preimp.db"})
+
+(defn init-db []
+  (jdbc/db-do-commands
+   db
+   "create table if not exists op (edn text)"))
+
+(defn read-ops []
+  (swap! state assoc :ops (into #{}
+                                (for [row (jdbc/query db ["select * from op"])]
+                                  (clojure.edn/read-string {:readers preimp.state/readers} (:edn row))))))
+
+(defn write-ops [ops]
+  (doseq [op ops]
+    (jdbc/insert! db :op {:edn (pr-str op)})))
 
 (defn send-ops [ws]
   (try
@@ -23,7 +44,9 @@
 
 (defn recv-ops [recv-ws msg-str]
   (let [msg (clojure.edn/read-string {:readers preimp.state/readers} msg-str)
-        old-ops (@state :ops)]
+        old-ops (@state :ops)
+        novel-ops (clojure.set/difference (:ops msg) old-ops)]
+    (write-ops novel-ops)
     (swap! state assoc-in [:client->websocket (:client msg)] recv-ws)
     (swap! state update-in [:ops] clojure.set/union (:ops msg))
     (when (not= old-ops (:ops msg))

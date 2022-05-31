@@ -411,6 +411,9 @@
       "go offline"
       "go online")]
    [:button
+    {:on-click #(insert-cell-after nil)}
+    "add cell"]
+   [:button
     {:on-click #(swap! state update-in [:show-debug-panel?] not)}
     (if (@state :show-debug-panel?) "close debug panel" "show debug panel")]
    (when (@state :show-debug-panel?)
