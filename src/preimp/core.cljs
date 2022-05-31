@@ -52,7 +52,9 @@
     ;; other id/value pairs that were used to compute this id
     :id->deps {}
 
-    :show-debug-panel? true}))
+    :show-debug-panel? true
+
+    :online-mode? true}))
 
 ;; --- compiler stuff ---
 
@@ -278,6 +280,49 @@
         new-ops (preimp.state/remove-cell old-ops client cell-id)]
     (change-input (Ops.) new-ops)))
 
+;; --- network ---
+
+(defn send-ops []
+  (d :sending (count (recall-or-recompute (Ops.))))
+  (try
+    (.send (@state :websocket) (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
+    (catch :default error (d :ws-send-error error))))
+
+(declare update-codemirrors)
+
+(defn connect []
+  (when (@state :online-mode?)
+    (d :connecting)
+    (swap! state update-in [:connect-retry-timeout] * 2)
+    (swap! state assoc :websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
+    (set! (.-onopen (@state :websocket))
+          (fn [_]
+            (swap! state assoc :connect-retry-timeout 100)
+            (send-ops)))
+    (set! (.-onmessage (@state :websocket))
+          (fn [event]
+            (let [old-ops (recall-or-recompute (Ops.))
+                  server-ops (clojure.edn/read-string
+                              {:readers preimp.state/readers}
+                              (.-data event))
+                  _ (d :receiving (count server-ops))
+                  new-ops (clojure.set/union old-ops server-ops)]
+              (when (not= old-ops new-ops)
+                (change-input (Ops.) new-ops)
+                (update-codemirrors)))))
+    (set! (.-onerror (@state :websocket))
+          (fn [error]
+            (d :ws-error error)
+            (.close (@state :websocket))))
+    (set! (.-onclose (@state :websocket))
+          (fn []
+            (js/setTimeout connect (@state :connect-retry-timeout))))))
+
+(defn disconnect []
+  (d :disconnecting)
+  (.close (@state :websocket))
+  (swap! state assoc :connect-retry-timeout 100))
+
 ;; --- gui ---
 
 (defn editor [cell-id]
@@ -355,53 +400,26 @@
   [:div
    [:div (for [cell-id (recall-or-recompute (CellIds.))]
            ^{:key cell-id} [editor-and-output cell-id])]
-   (if (@state :show-debug-panel?)
-     [:div
-      [:button
-       {:on-click #(swap! state assoc :show-debug-panel? false)}
-       "^ debug ^"]
-      [debug]]
-     [:div
-      [:button
-       {:on-click #(swap! state assoc :show-debug-panel? true)}
-       "v debug v"]])])
+   [:button
+
+    {:on-click (fn []
+                 (swap! state update-in [:online-mode?] not)
+                 (if (@state :online-mode?)
+                   (connect)
+                   (disconnect)))}
+    (if (@state :online-mode?)
+      "go offline"
+      "go online")]
+   [:button
+    {:on-click #(swap! state update-in [:show-debug-panel?] not)}
+    (if (@state :show-debug-panel?) "close debug panel" "show debug panel")]
+   (when (@state :show-debug-panel?)
+     [debug])])
 
 (defn mount-root []
   (dom/render [app] (.getElementById js/document "app"))
   ;; for some reason eval fails if we run it during load
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
-
-;; --- network ---
-
-(defn send-ops []
-  (d :sending (count (recall-or-recompute (Ops.))))
-  (try
-    (.send (@state :websocket) (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
-    (catch :default error (d :ws-send-error error))))
-
-(defn connect []
-  (d :connecting)
-  (swap! state update-in [:connect-retry-timeout] * 2)
-  (swap! state assoc :websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
-  (set! (.-onopen (@state :websocket)) (fn [_]
-                                         (swap! state assoc :connect-retry-timeout 100)
-                                         (send-ops)))
-  (set! (.-onmessage (@state :websocket)) (fn [event]
-                                            (let [old-ops (recall-or-recompute (Ops.))
-                                                  server-ops
-                                                  (clojure.edn/read-string
-                                                   {:readers preimp.state/readers}
-                                                   (.-data event))
-                                                  _ (d :receiving (count server-ops))
-                                                  new-ops (clojure.set/union old-ops server-ops)]
-                                              (when (not= old-ops new-ops)
-                                                (change-input (Ops.) new-ops)
-                                                (update-codemirrors)))))
-  (set! (.-onerror (@state :websocket)) (fn [error]
-                                          (d :ws-error error)
-                                          (.close (@state :websocket))))
-  (set! (.-onclose (@state :websocket)) (fn []
-                                          (js/setTimeout connect (@state :connect-retry-timeout)))))
 
 ;; --- init ---
 
