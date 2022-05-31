@@ -50,7 +50,9 @@
     :id->value {(Ops.) #{}}
 
     ;; other id/value pairs that were used to compute this id
-    :id->deps {}}))
+    :id->deps {}
+
+    :show-debug-panel? true}))
 
 ;; --- compiler stuff ---
 
@@ -338,7 +340,6 @@
 
 (defn debug []
   [:div
-   [:hr {:style {:margin "2rem"}}]
    (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
             (let [color (if (instance? Error value) "red" "black")]
               ^{:key (pr-str id)} [:div
@@ -354,7 +355,16 @@
   [:div
    [:div (for [cell-id (recall-or-recompute (CellIds.))]
            ^{:key cell-id} [editor-and-output cell-id])]
-   [debug]])
+   (if (@state :show-debug-panel?)
+     [:div
+      [:button
+       {:on-click #(swap! state assoc :show-debug-panel? false)}
+       "^ debug ^"]
+      [debug]]
+     [:div
+      [:button
+       {:on-click #(swap! state assoc :show-debug-panel? true)}
+       "v debug v"]])])
 
 (defn mount-root []
   (dom/render [app] (.getElementById js/document "app"))
