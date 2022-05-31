@@ -16,33 +16,41 @@
 ;; --- state ---
 
 (defrecord Ops [])
-
-(def codemirrors (atom {}))
-(def code-at-focus (r/atom {}))
-(def code-now (r/atom {}))
-(def websocket (atom nil))
+(defrecord Error [error])
 
 (def client (random-uuid))
 
-(def gui-state
-  (r/atom {;; version increments on every change made from the outside
-           :version 0
+(def state
+  (r/atom
+   {:websocket nil
 
-      ;; the last version at which this id was computed
-           :id->version {(Ops.) 0}
+    :connect-retry-timeout 100
 
-      ;; the value when this id was last computed
-      ;; (may be an Error)
-           :id->value {(Ops.) #{}}
+    ;; the codemirror object for each cell
+    :cell-id->codemirror {}
 
-      ;; other id/value pairs that were used to compute this id
-           :id->deps {}}))
+    ;; code that was in each codemirror when it was last focused
+    :code-at-focus {}
 
-(def connect-retry-timeout (atom 100))
+    ;; code that is currently in each codemirror
+    :code-now {}
 
-(def last-inserted (atom nil))
+    ;; cell-id that was most recently inserted
+    ;; (used for autofocus on mount)
+    :last-inserted nil
 
-(defrecord Error [error])
+    ;; version increments on every change made from the outside
+    :version 0
+
+    ;; the last version at which this id was computed
+    :id->version {(Ops.) 0}
+
+    ;; the value when this id was last computed
+    ;; (may be an Error)
+    :id->value {(Ops.) #{}}
+
+    ;; other id/value pairs that were used to compute this id
+    :id->deps {}}))
 
 ;; --- compiler stuff ---
 
@@ -82,17 +90,17 @@
   (some
    (fn [[dep dep-value]]
      (not= (recall-or-recompute dep) dep-value))
-   (get-in @gui-state [:id->deps id])))
+   (get-in @state [:id->deps id])))
 
 (defn stale? [id]
   (or
-   (not (contains? (@gui-state :id->value) id))
-   (and (not= (get-in @gui-state [:id->version id]) (:version @gui-state))
+   (not (contains? (@state :id->value) id))
+   (and (not= (get-in @state [:id->version id]) (:version @state))
         (deps-changed? id))))
 
 (defn recompute [id]
   ;(d :recompute id)
-  (let [old-value (get-in @gui-state [:id->value id])
+  (let [old-value (get-in @state [:id->value id])
         new-deps (atom {})
         new-value (try
                     (compute* id (fn [id]
@@ -103,18 +111,18 @@
                                        value))))
                     (catch :default error
                       (Error. error)))]
-    (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
+    (swap! state assoc-in [:id->version id] (:version @state))
     (when (not= old-value new-value)
-      (swap! gui-state assoc-in [:id->value id] new-value))
-    (swap! gui-state assoc-in [:id->deps id] @new-deps)
+      (swap! state assoc-in [:id->value id] new-value))
+    (swap! state assoc-in [:id->deps id] @new-deps)
     new-value))
 
 (defn recall-or-recompute [id]
   (if (stale? id)
     (recompute id)
     (do
-      (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
-      (get-in @gui-state [:id->value id]))))
+      (swap! state assoc-in [:id->version id] (:version @state))
+      (get-in @state [:id->value id]))))
 
 ;; --- incremental nodes ---
 
@@ -227,9 +235,9 @@
 (declare send-ops)
 
 (defn change-input [id value]
-  (swap! gui-state update-in [:version] inc)
-  (swap! gui-state assoc-in [:id->version id] (:version @gui-state))
-  (swap! gui-state assoc-in [:id->value id] value)
+  (swap! state update-in [:version] inc)
+  (swap! state assoc-in [:id->version id] (:version @state))
+  (swap! state assoc-in [:id->value id] value)
   (when (instance? Ops id)
     (send-ops)))
 
@@ -240,12 +248,12 @@
         new-code (pr-str `(~'defs ~name ~new-value))
         old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
-    (.setValue (get @codemirrors cell-id) new-code)
+    (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
     (change-input (Ops.) new-ops)
     new-value))
 
 (defn update-cell [cell-id]
-  (let [new-value (.getValue (get @codemirrors cell-id))
+  (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))
         old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/assoc-cell old-ops client cell-id new-value)]
     (change-input (Ops.) new-ops)))
@@ -254,7 +262,7 @@
   (let [new-cell-id (random-uuid)
         old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/insert-cell old-ops client new-cell-id prev-cell-id)]
-    (reset! last-inserted new-cell-id)
+    (swap! state assoc :last-inserted new-cell-id)
     (change-input (Ops.) new-ops)))
 
 (defn insert-cell-before [next-cell-id]
@@ -291,26 +299,26 @@
                                                                  (update-cell cell-id))
                                              "Ctrl-Backspace" (fn [_] (remove-cell cell-id))}
                              :matchBrackets true
-                             :autofocus (= cell-id @last-inserted)
+                             :autofocus (= cell-id (@state :last-inserted))
                              :viewportMargin js/Infinity})]
         (.on codemirror "changes" (fn [_]
-                                    (swap! code-now assoc cell-id (.getValue codemirror))))
+                                    (swap! state assoc-in [:code-now cell-id] (.getValue codemirror))))
         (.on codemirror "blur" (fn [_]
-                                 (when (not= (@code-now cell-id) (@code-at-focus cell-id))
-                                   (swap! code-at-focus assoc cell-id (.getValue codemirror))
+                                 (when (not= ((@state :code-now) cell-id) ((@state :code-at-focus) cell-id))
+                                   (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))
                                    (update-cell cell-id))))
         (.on codemirror "focus" (fn [_]
-                                  (swap! code-at-focus assoc cell-id (.getValue codemirror))))
-        (swap! codemirrors assoc cell-id codemirror)
-        (swap! code-at-focus assoc cell-id value)
-        (swap! code-now assoc cell-id value)
+                                  (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))))
+        (swap! state assoc-in [:cell-id->codemirror cell-id] codemirror)
+        (swap! state assoc-in [:code-at-focus cell-id] value)
+        (swap! state assoc-in [:code-now cell-id] value)
         (.setValue codemirror value)))}))
 
 (defn update-codemirrors []
   (doseq [cell-id (recall-or-recompute (CellIds.))
           :let [cell-code (recall-or-recompute (CellCode. cell-id))]]
-    (when-let [code-mirror (@codemirrors cell-id)]
-      (when (= (@code-at-focus cell-id) (@code-now cell-id))
+    (when-let [code-mirror ((@state :cell-id->codemirror) cell-id)]
+      (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
         (.setValue code-mirror cell-code)))))
 
 (defn output [cell-id]
@@ -323,7 +331,7 @@
 (defn editor-and-output [cell-id]
   [:div
    [:div
-    {:style {:border (if (= (@code-at-focus cell-id) (@code-now cell-id)) "1px solid #eee" "1px solid #bbb")}}
+    {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")}}
     [editor cell-id]]
    [output cell-id]
    [:div {:style {:padding "1rem"}}]])
@@ -331,16 +339,16 @@
 (defn debug []
   [:div
    [:hr {:style {:margin "2rem"}}]
-   (doall (for [[id value] (sort-by #(pr-str (first %)) (@gui-state :id->value))]
+   (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
             (let [color (if (instance? Error value) "red" "black")]
               ^{:key (pr-str id)} [:div
-                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @gui-state [:id->version id]))]
+                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
                                    " "
                                    [:span {:style {:font-weight "bold"}} (pr-str id)]
                                    " "
                                    [:span {:style {:color color}} (pr-str value)]
                                    " "
-                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @gui-state [:id->deps id]))))]])))])
+                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
 
 (defn app []
   [:div
@@ -358,32 +366,32 @@
 (defn send-ops []
   (d :sending (count (recall-or-recompute (Ops.))))
   (try
-    (.send @websocket (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
+    (.send (@state :websocket) (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
     (catch :default error (d :ws-send-error error))))
 
 (defn connect []
   (d :connecting)
-  (swap! connect-retry-timeout * 2)
-  (reset! websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
-  (set! (.-onopen @websocket) (fn [_]
-                                (reset! connect-retry-timeout 100)
-                                (send-ops)))
-  (set! (.-onmessage @websocket) (fn [event]
-                                   (let [old-ops (recall-or-recompute (Ops.))
-                                         server-ops
-                                         (clojure.edn/read-string
-                                          {:readers preimp.state/readers}
-                                          (.-data event))
-                                         _ (d :receiving (count server-ops))
-                                         new-ops (clojure.set/union old-ops server-ops)]
-                                     (when (not= old-ops new-ops)
-                                       (change-input (Ops.) new-ops)
-                                       (update-codemirrors)))))
-  (set! (.-onerror @websocket) (fn [error]
-                                 (d :ws-error error)
-                                 (.close @websocket)))
-  (set! (.-onclose @websocket) (fn []
-                                 (js/setTimeout connect @connect-retry-timeout))))
+  (swap! state update-in [:connect-retry-timeout] * 2)
+  (swap! state assoc :websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
+  (set! (.-onopen (@state :websocket)) (fn [_]
+                                         (swap! state assoc :connect-retry-timeout 100)
+                                         (send-ops)))
+  (set! (.-onmessage (@state :websocket)) (fn [event]
+                                            (let [old-ops (recall-or-recompute (Ops.))
+                                                  server-ops
+                                                  (clojure.edn/read-string
+                                                   {:readers preimp.state/readers}
+                                                   (.-data event))
+                                                  _ (d :receiving (count server-ops))
+                                                  new-ops (clojure.set/union old-ops server-ops)]
+                                              (when (not= old-ops new-ops)
+                                                (change-input (Ops.) new-ops)
+                                                (update-codemirrors)))))
+  (set! (.-onerror (@state :websocket)) (fn [error]
+                                          (d :ws-error error)
+                                          (.close (@state :websocket))))
+  (set! (.-onclose (@state :websocket)) (fn []
+                                          (js/setTimeout connect (@state :connect-retry-timeout)))))
 
 ;; --- init ---
 
