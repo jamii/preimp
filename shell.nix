@@ -15,6 +15,7 @@ in
 pkgs.mkShell rec {
     buildInputs = [
         pkgs.clojure
+        pkgs.jre_minimal
         pkgs.nixopsUnstable
     ];
     shellHook = ''
