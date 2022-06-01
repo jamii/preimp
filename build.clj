@@ -13,7 +13,7 @@
 (defn uber [_]
   (clean nil)
   ;; TODO copying out to get the js is a total hack
-  (b/copy-dir {:src-dirs ["src" "out"]
+  (b/copy-dir {:src-dirs ["src" "out" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :src-dirs ["src"]
