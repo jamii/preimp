@@ -68,7 +68,7 @@
     [:div#app "loading..."]
     (include-css "cljsjs/codemirror/development/codemirror.css")
     [:style ".CodeMirror {height: auto;}"]
-    (include-js "out/main.js")]))
+    (include-js "main.js")]))
 
 (def websocket-handler
   {:on-connect (fn [ws])
@@ -91,10 +91,16 @@
      :headers {"Content-Type" "text/html"}
      :body page}))
 
-(def app
+(def app-inner
   (-> handler
-      (wrap-file "public" {:allow-symlinks? true})
       (wrap-resource "")))
+
+(defn app [request]
+  ;; this is a hack to make cljs debug builds work with wrap-resource
+  (let [request (if (.startsWith (:uri request) "/out")
+                  (assoc request :uri (subs (:uri request) 4))
+                  request)]
+    (app-inner request)))
 
 ;; --- misc ---
 

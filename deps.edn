@@ -9,6 +9,7 @@
         org.clojure/java.jdbc {:mvn/version "0.7.12"}
         org.xerial/sqlite-jdbc {:mvn/version "3.36.0.3"}
     }
+ :paths ["src" "out"]
  :aliases 
    {:build {:deps {io.github.clojure/tools.build {:git/tag "v0.8.1" :git/sha "7d40500"}}
             :ns-default build}}}

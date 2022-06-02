@@ -62,6 +62,10 @@ in
                     forceSSL = true;
                     locations."/" = {
                         proxyPass = "http://0.0.0.0:3000"; # without a trailing /
+                        extraConfig = ''
+                            proxy_set_header Upgrade $http_upgrade;
+                            proxy_set_header Connection "Upgrade";
+                        '';
                     };
                     basicAuth = secret.basicAuth;
                 };
@@ -73,9 +77,10 @@ in
         
         systemd.services.preimp = {
             description = "preimp";
-            path = with pkgs; [ jre_minimal ];
+            path = with pkgs; [ jre ];
             serviceConfig = {
                 User = "jamie";
+                WorkingDirectory = "/home/jamie";
                 ExecStart = "/usr/bin/env java -jar ${./target/preimp-1.0.0-standalone.jar}";
             };
         };

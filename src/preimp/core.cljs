@@ -294,7 +294,9 @@
   (when (@state :online-mode?)
     (d :connecting)
     (swap! state update-in [:connect-retry-timeout] * 2)
-    (swap! state assoc :websocket (new js/WebSocket. (str "ws://" js/location.host "/")))
+    (let [ws-protocol (case js/location.protocol "https:" "wss:" "http:" "ws:")
+          ws-address (str ws-protocol "//" js/location.host "/")]
+      (swap! state assoc :websocket (new js/WebSocket. ws-address)))
     (set! (.-onopen (@state :websocket))
           (fn [_]
             (swap! state assoc :connect-retry-timeout 100)
