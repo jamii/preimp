@@ -3,16 +3,12 @@ Prototyping interactions for [imp](https://github.com/jamii/imp) without getting
 Build (dev):
 
 ``` bash
-clj -M --main cljs.main --compile preimp.core
-
-# or 
-
 clj -M --main cljs.main --watch src --compile preimp.core
 ```
 
-Serve:
+Serve (dev):
 
-``` bash
+``` clj
 (require 'preimp.server :reload-all)
 (preimp.server/-main)
 ```
@@ -25,13 +21,22 @@ clojure -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
 
 Build (prod):
 
-```
+``` bash
 clj -T:build build/uber
+clj -M --main cljs.main --optimizations sim
+ple --compile preimp.core
+```
+
+Serve (prod):
+
+``` bash
+java -jar target/preimp-1.0.0-standalone.jar
 ```
 
 Deploy:
 
-```
-nixops create -d preimp
+``` bash
+# on first deploy:
+# nixops create -d preimp
 nixops deploy -d preimp
 ```
