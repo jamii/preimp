@@ -16,15 +16,14 @@ Serve (dev):
 Format:
 
 ``` bash
-clojure -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
+clj -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
 ```
 
 Build (prod):
 
 ``` bash
 clj -T:build build/uber
-clj -M --main cljs.main --optimizations sim
-ple --compile preimp.core
+clj -M --main cljs.main --optimizations simple --compile preimp.core
 ```
 
 Serve (prod):

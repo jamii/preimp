@@ -7,9 +7,11 @@
    cljsjs.codemirror.addon.comment.comment
    [reagent.dom :as dom]
    [reagent.core :as r]
-   [cljs.js :refer [empty-state eval-str js-eval]]
+   cljs.js
    preimp.state
-   clojure.edn))
+   clojure.edn
+   clojure.set
+   cljs.tools.reader.impl.utils))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -58,12 +60,12 @@
 
 ;; --- compiler stuff ---
 
-(def eval-state (empty-state))
+(def eval-state (cljs.js/empty-state))
 (cljs.js/load-analysis-cache! eval-state 'clojure.string (analyzer-state 'clojure.string))
 (cljs.js/load-analysis-cache! eval-state 'preimp.core (analyzer-state 'preimp.core))
 
 (def eval-config
-  {:eval js-eval
+  {:eval cljs.js/js-eval
    :source-map true
    :context :expr})
 
@@ -370,19 +372,64 @@
       (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
         (.setValue code-mirror cell-code)))))
 
+(defn edn [value]
+  (cond
+    (map? value)
+    (let [value (try (sort value) (catch :default _ value))]
+      [:table
+       {:style {:border-left "1px solid black"
+                :border-right "1px solid black"
+                :border-radius "0.5em"
+                :padding "0.5em"}}
+       [:tbody
+        (for [[k v] value]
+          ^{:key (pr-str k)}
+          [:tr
+           [:td [edn k]]
+           [:td [edn v]]])]])
+
+    (vector? value)
+    [:table
+     {:style {:border-left "1px solid black"
+              :border-right "1px solid black"
+              :border-radius "0"
+              :padding "0.5em"}}
+     [:tbody
+      (for [[elem i] (map vector value (range))]
+        ^{:key i}
+        [:tr
+         [:td [edn elem]]])]]
+
+    (set? value)
+    (let [value (try (sort value) (catch :default _ value))]
+      [:table
+       {:style {:border-left "1px solid black"
+                :border-right "1px solid black"
+                :border-radius "0.5em"
+                :padding "0.5em"}}
+       [:tbody
+        (for [[elem i] (map vector value (range))]
+          ^{:key i}
+          [:tr
+           [:td [edn elem]]])]])
+    :else
+    [:code (pr-str value)]))
+
 (defn output [cell-id]
   [:div
    (let [value (let [name (recall-or-recompute (CellParse. cell-id))]
                  (if (instance? Error name) name
                      (recall-or-recompute (Value. (:name name)))))]
-     (pr-str value))])
+     (edn value))])
 
 (defn editor-and-output [cell-id]
   [:div
    [:div
-    {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")}}
+    {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
+             :padding "0.5em"}}
     [editor cell-id]]
-   [output cell-id]
+   [:div {:style {:padding "0.5em"}}
+    [output cell-id]]
    [:div {:style {:padding "1rem"}}]])
 
 (defn debug []
