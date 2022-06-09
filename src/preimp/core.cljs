@@ -15,6 +15,8 @@
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
+(defrecord Action [name f])
+
 ;; --- state ---
 
 (defrecord Ops [])
@@ -71,7 +73,12 @@
 
 (defn eval-form [state form]
   (let [result (atom nil)]
-    (cljs.js/eval eval-state `(let [~'edit! ~'preimp.core/edit!] ~form) eval-config #(reset! result %))
+    (cljs.js/eval eval-state
+                  `(let [~'edit! ~'preimp.core/edit!
+                         ~'->Action ~'preimp.core/->Action]
+                     ~form)
+                  eval-config
+                  #(reset! result %))
     ;; while eval can be async, it usually isn't
     (assert @result)
     @result))
@@ -247,17 +254,6 @@
   (when (instance? Ops id)
     (send-ops)))
 
-(defn edit! [name f & args]
-  (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
-        old-value (recall-or-recompute (Value. name))
-        new-value (apply f old-value args)
-        new-code (pr-str `(~'defs ~name ~new-value))
-        old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
-    (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
-    (change-input (Ops.) new-ops)
-    new-value))
-
 (defn update-cell [cell-id]
   (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))
         old-ops (recall-or-recompute (Ops.))
@@ -374,6 +370,11 @@
 
 (defn edn [value]
   (cond
+    (instance? Action value)
+    [:button
+     {:on-click (fn [] ((:f value)))}
+     (:name value)]
+
     (map? value)
     (let [value (try (sort value) (catch :default _ value))]
       [:table
@@ -472,6 +473,19 @@
   (dom/render [app] (.getElementById js/document "app"))
   ;; for some reason eval fails if we run it during load
   #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
+
+;; --- fns exposed to cells ---
+
+(defn edit! [name f & args]
+  (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
+        old-value (recall-or-recompute (Value. name))
+        new-value (apply f old-value args)
+        new-code (pr-str `(~'defs ~name ~new-value))
+        old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
+    (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
+    (change-input (Ops.) new-ops)
+    new-value))
 
 ;; --- init ---
 
