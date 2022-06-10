@@ -513,15 +513,18 @@
 ;; --- fns exposed to cells ---
 
 (defn edit! [name f & args]
-  (let [cell-id (:cell-id (recall-or-recompute (Def. name)))
-        old-value (recall-or-recompute (Value. name))
-        new-value (apply f old-value args)
-        new-code (pr-str `(~'defs ~name ~new-value))
-        old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
-    (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
-    (change-input (Ops.) new-ops)
-    new-value))
+  (let [def (recall-or-recompute (Def. name))]
+    (if (instance? Error def)
+      def
+      (let [cell-id (:cell-id def)
+            old-value (recall-or-recompute (Value. name))
+            new-value (apply f old-value args)
+            new-code (pr-str `(~'defs ~name ~new-value))
+            old-ops (recall-or-recompute (Ops.))
+            new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
+        (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
+        (change-input (Ops.) new-ops)
+        nil))))
 
 ;; --- init ---
 
