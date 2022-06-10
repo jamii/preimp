@@ -226,7 +226,7 @@
 
                      defn `(fn [~@deps] (fn ~@(:body def))))
               thunk (eval-form (atom @eval-state) form)]
-          (if-let [error (:error :thunk)]
+          (if-let [error (:error thunk)]
             (throw error)
             {:thunk (:value thunk)
              :args deps}))))))
