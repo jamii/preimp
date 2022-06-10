@@ -393,6 +393,7 @@
           output (r/atom nil)]
       (fn [value]
         [:form
+         {:action "function () {}"}
          (doall (for [[arg-ix arg] (map vector arg-ixes args)]
                   ^{:key arg-ix}
                   [:input
@@ -400,12 +401,12 @@
                     :value @arg
                     :on-change (fn [event] (reset! arg (-> event .-target .-value)))}]))
          [:button
-          {:on-click (fn []
+          {:on-click (fn [event]
                        (reset! output
                                (try (apply value (for [arg args]
                                                    (clojure.edn/read-string @arg)))
                                     (catch :default err (Error. err))))
-                       true)}
+                       (.preventDefault event))}
           (fn-name value)]
          (when @output
            [edn @output])]))
