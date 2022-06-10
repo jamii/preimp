@@ -387,10 +387,28 @@
 
 (defn edn [value]
   (cond
-    (and (fn? value) (= 0 (fn-num-args value)))
-    [:button
-     {:on-click (fn [] (value))}
-     (fn-name value)]
+    (fn? value)
+    (let [arg-ixes (range (fn-num-args value))
+          args (into [] (for [_ arg-ixes] (r/atom "")))
+          output (r/atom nil)]
+      (fn [value]
+        [:form
+         (doall (for [[arg-ix arg] (map vector arg-ixes args)]
+                  ^{:key arg-ix}
+                  [:input
+                   {:type "text"
+                    :value @arg
+                    :on-change (fn [event] (reset! arg (-> event .-target .-value)))}]))
+         [:button
+          {:on-click (fn []
+                       (reset! output
+                               (try (apply value (for [arg args]
+                                                   (clojure.edn/read-string @arg)))
+                                    (catch :default err (Error. err))))
+                       true)}
+          (fn-name value)]
+         (when @output
+           [edn @output])]))
 
     (map? value)
     (let [value (try (sort value) (catch :default _ value))]
@@ -438,7 +456,7 @@
    (let [value (let [name (recall-or-recompute (CellParse. cell-id))]
                  (if (instance? Error name) name
                      (recall-or-recompute (Value. (:name name)))))]
-     (edn value))])
+     [edn value])])
 
 (defn editor-and-output [cell-id]
   [:div
