@@ -15,8 +15,6 @@
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
-(defrecord Action [name f])
-
 ;; --- state ---
 
 (defrecord Ops [])
@@ -224,7 +222,7 @@
               form (case kind
                      def `(fn [~@deps] ~@(:body def))
 
-                     defn `(fn [~@deps] (fn ~@(:body def))))
+                     defn `(fn [~@deps] (fn ~name ~@(:body def))))
               thunk (eval-form (atom @eval-state) form)]
           (if-let [error (:error thunk)]
             (throw error)
@@ -364,12 +362,35 @@
       (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
         (.setValue code-mirror cell-code)))))
 
+(defn fn-name [f]
+  (cond
+    (instance? cljs.core.MetaFn f)
+    (or (:name (meta f))
+        (fn-name (.-afn f)))
+
+    (fn? f)
+    (last (clojure.string/split (.-name f) "$"))
+
+    :else
+    (throw (str "Not a function: " (pr-str f)))))
+
+(defn fn-num-args [f]
+  (cond
+    (instance? cljs.core.MetaFn f)
+    (fn-num-args (.-afn f))
+
+    (fn? f)
+    (.-length f)
+
+    :else
+    (throw (str "Not a function: " (pr-str f)))))
+
 (defn edn [value]
   (cond
-    (instance? Action value)
+    (and (fn? value) (= 0 (fn-num-args value)))
     [:button
-     {:on-click (fn [] ((:f value)))}
-     (:name value)]
+     {:on-click (fn [] (value))}
+     (fn-name value)]
 
     (map? value)
     (let [value (try (sort value) (catch :default _ value))]
