@@ -69,16 +69,12 @@
 (def eval-config
   {:eval cljs.js/js-eval
    :source-map true
-   :context :expr})
+   :context :expr
+   :ns 'preimp.core})
 
 (defn eval-form [state form]
   (let [result (atom nil)]
-    (cljs.js/eval eval-state
-                  `(let [~'edit! ~'preimp.core/edit!
-                         ~'->Action ~'preimp.core/->Action]
-                     ~form)
-                  eval-config
-                  #(reset! result %))
+    (cljs.js/eval eval-state form eval-config #(reset! result %))
     ;; while eval can be async, it usually isn't
     (assert @result)
     @result))
