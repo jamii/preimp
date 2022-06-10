@@ -146,7 +146,9 @@
 (defrecord CellCode [id]
   Incremental
   (compute* [this compute]
-    (get-in (compute (State.)) [:cell-codes id])))
+    (or
+     (get-in (compute (State.)) [:cell-maps id :code])
+     "")))
 
 (defrecord CellParse [id]
   Incremental
@@ -251,7 +253,7 @@
 (defn update-cell [cell-id]
   (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))
         old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/assoc-cell old-ops client cell-id new-value)]
+        new-ops (preimp.state/assoc-cell old-ops client cell-id :code new-value)]
     (change-input (Ops.) new-ops)))
 
 (defn insert-cell-after [prev-cell-id]
@@ -388,6 +390,7 @@
 (defn edn [value]
   (cond
     (fn? value)
+    ;; TODO reagent can't tell when a function changes, so this doesn't update nicely
     (let [arg-ixes (range (fn-num-args value))
           args (into [] (for [_ arg-ixes] (r/atom "")))
           output (r/atom nil)]
@@ -521,7 +524,7 @@
             new-value (apply f old-value args)
             new-code (pr-str `(~'defs ~name ~new-value))
             old-ops (recall-or-recompute (Ops.))
-            new-ops (preimp.state/assoc-cell old-ops client cell-id new-code)]
+            new-ops (preimp.state/assoc-cell old-ops client cell-id :code new-code)]
         (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
         (change-input (Ops.) new-ops)
         nil))))
