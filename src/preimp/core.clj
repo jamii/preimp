@@ -53,6 +53,26 @@
         (when (not= client (:client msg))
           (send-ops other-ws))))))
 
+;; --- change polling ---
+
+(def data-version-connection (jdbc/get-connection db))
+
+(def last-data-version (atom nil))
+
+(defn db-changed? []
+  (let [current-data-version (:data_version (jdbc/execute-one! data-version-connection ["PRAGMA data_version;"]))
+        changed? (not= @last-data-version current-data-version)]
+    (reset! last-data-version current-data-version)
+    changed?))
+
+(defn read-ops-if-changed []
+  (when (db-changed?)
+    (prn :refreshing)
+    (read-ops)
+    ;; TODO need to centralize decisions about when to send updates
+    (doseq [[client other-ws] (@state :client->websocket)]
+      (send-ops other-ws))))
+
 ;; --- handlers ---
 
 (def page
@@ -76,10 +96,12 @@
            ;; TODO remove client from client->websocket
                (prn [:ws-close status-code reason]))
    :on-text (fn [ws text]
+              (read-ops-if-changed)
               (recv-ops ws text))
    :on-bytes (fn [ws bytes offset len])
    :on-ping (fn [ws bytebuffer])
-   :on-pong (fn [ws bytebuffer])})
+   :on-pong (fn [ws bytebuffer]
+              (read-ops-if-changed))})
 
 (defn handler [request]
   (if (jetty/ws-upgrade-request? request)
