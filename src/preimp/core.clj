@@ -6,7 +6,7 @@
    [ring.middleware.file :refer [wrap-file]]
    [ring.middleware.resource :refer [wrap-resource]]
    preimp.state
-   [clojure.java.jdbc :as jdbc]))
+   [next.jdbc :as jdbc]))
 
 ;; --- state ---
 
@@ -17,24 +17,21 @@
 
 ;; --- actions ---
 
-(def db
-  {:classname   "org.sqlite.JDBC"
-   :subprotocol "sqlite"
-   :subname     "preimp.db"})
+(def db (jdbc/get-datasource "jdbc:sqlite:preimp.db"))
 
 (defn init-db []
-  (jdbc/db-do-commands
+  (jdbc/execute!
    db
-   "create table if not exists op (edn text)"))
+   ["create table if not exists op (edn text)"]))
 
 (defn read-ops []
-  (swap! state assoc :ops (into #{}
-                                (for [row (jdbc/query db ["select * from op"])]
-                                  (clojure.edn/read-string {:readers preimp.state/readers} (:edn row))))))
+  (let [ops (for [row (jdbc/execute! db ["select * from op"])]
+              (clojure.edn/read-string {:readers preimp.state/readers} (:op/edn row)))]
+    (swap! state assoc :ops (into #{} ops))))
 
 (defn write-ops [ops]
   (doseq [op ops]
-    (jdbc/insert! db :op {:edn (pr-str op)})))
+    (jdbc/execute! db ["insert into op values (?)" (pr-str op)])))
 
 (defn send-ops [ws]
   (try
