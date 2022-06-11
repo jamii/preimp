@@ -143,17 +143,17 @@
   (compute* [this compute]
     (:cell-ids (compute (State.)))))
 
-(defrecord CellCode [id]
+(defrecord CellMap [id]
   Incremental
   (compute* [this compute]
     (or
-     (get-in (compute (State.)) [:cell-maps id :code])
+     (get-in (compute (State.)) [:cell-maps id])
      "")))
 
 (defrecord CellParse [id]
   Incremental
   (compute* [this compute]
-    (let [code (compute (CellCode. id))
+    (let [code (:code (compute (CellMap. id)))
           reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
           defs (atom [])]
       (while (cljs.tools.reader.reader-types.peek-char reader)
@@ -259,7 +259,10 @@
 (defn insert-cell-after [prev-cell-id]
   (let [new-cell-id (random-uuid)
         old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/insert-cell old-ops client new-cell-id prev-cell-id)]
+        new-ops (-> old-ops
+                    (preimp.state/insert-cell client new-cell-id prev-cell-id)
+                    (preimp.state/assoc-cell client new-cell-id :code "")
+                    (preimp.state/assoc-cell client new-cell-id :visibility :code-and-output))]
     (swap! state assoc :last-inserted new-cell-id)
     (change-input (Ops.) new-ops)))
 
@@ -327,7 +330,7 @@
     (fn [] [:textarea])
     :component-did-mount
     (fn [this]
-      (let [value (recall-or-recompute (CellCode. cell-id))
+      (let [value (:code (recall-or-recompute (CellMap. cell-id)))
             codemirror (.fromTextArea
                         js/CodeMirror
                         (dom/dom-node this)
@@ -359,7 +362,7 @@
 
 (defn update-codemirrors []
   (doseq [cell-id (recall-or-recompute (CellIds.))
-          :let [cell-code (recall-or-recompute (CellCode. cell-id))]]
+          :let [cell-code (:code (recall-or-recompute (CellMap. cell-id)))]]
     (when-let [code-mirror ((@state :cell-id->codemirror) cell-id)]
       (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
         (.setValue code-mirror cell-code)))))
@@ -457,20 +460,43 @@
 
 (defn output [cell-id]
   [:div
-   (let [value (let [name (recall-or-recompute (CellParse. cell-id))]
-                 (if (instance? Error name) name
-                     (recall-or-recompute (Value. (:name name)))))]
+   (let [value (let [parse (recall-or-recompute (CellParse. cell-id))]
+                 (if (instance? Error parse)
+                   parse
+                   (recall-or-recompute (Value. (:name parse)))))]
      [edn value])])
 
+(defn toggle-visibility [cell-id old-visibility]
+  (let [new-visibility (case old-visibility
+                         :code-and-output :output
+                         :output :none
+                         :none :code-and-output)
+        old-ops (recall-or-recompute (Ops.))
+        new-ops (preimp.state/assoc-cell old-ops client cell-id :visibility new-visibility)]
+    (change-input (Ops.) new-ops)))
+
 (defn editor-and-output [cell-id]
-  [:div
-   [:div
-    {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
-             :padding "0.5em"}}
-    [editor cell-id]]
-   [:div {:style {:padding "0.5em"}}
-    [output cell-id]]
-   [:div {:style {:padding "1rem"}}]])
+  (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
+    [:div
+     [:button
+      {:on-click #(toggle-visibility cell-id visibility)}
+      (case visibility
+        :code-and-output "--"
+        :output "-"
+        :none "+")]
+     (if (= :code-and-output visibility)
+       [:div
+        {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
+                 :padding "0.5em"}}
+        [editor cell-id]]
+       [:div
+        (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
+          [:span name]
+          [:span {:style {:color "grey"}} "no name"])])
+     (when (#{:output :code-and-output} visibility)
+       [:div {:style {:padding "0.5em"}}
+        [output cell-id]])
+     [:div {:style {:padding "1rem"}}]]))
 
 (defn debug []
   [:div
