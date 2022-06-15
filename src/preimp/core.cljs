@@ -328,6 +328,7 @@
   (r/create-class
    {:render
     (fn [] [:textarea])
+
     :component-did-mount
     (fn [this]
       (let [value (:code (recall-or-recompute (CellMap. cell-id)))
@@ -358,7 +359,13 @@
         (swap! state assoc-in [:cell-id->codemirror cell-id] codemirror)
         (swap! state assoc-in [:code-at-focus cell-id] value)
         (swap! state assoc-in [:code-now cell-id] value)
-        (.setValue codemirror value)))}))
+        (.setValue codemirror value)))
+
+    :component-will-unmount
+    (fn [this]
+      (let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
+        (swap! state update-in [:cell-id->codemirror] dissoc cell-id)
+        (.toTextArea codemirror)))}))
 
 (defn update-codemirrors []
   (doseq [cell-id (recall-or-recompute (CellIds.))
