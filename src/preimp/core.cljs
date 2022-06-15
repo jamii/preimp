@@ -364,11 +364,10 @@
         (.toTextArea codemirror)))}))
 
 (defn update-codemirrors []
-  (doseq [cell-id (recall-or-recompute (CellIds.))
+  (doseq [[cell-id code-mirror] (@state :cell-id->codemirror)
           :let [cell-code (:code (recall-or-recompute (CellMap. cell-id)))]]
-    (when-let [code-mirror ((@state :cell-id->codemirror) cell-id)]
-      (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
-        (.setValue code-mirror cell-code)))))
+    (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
+      (.setValue code-mirror cell-code))))
 
 (defn fn-name [f]
   (cond
@@ -554,7 +553,8 @@
             new-code (pr-str `(~'defs ~name ~new-value))
             old-ops (recall-or-recompute (Ops.))
             new-ops (preimp.state/assoc-cell old-ops client cell-id :code new-code)]
-        (.setValue (get (@state :cell-id->codemirror) cell-id) new-code)
+        (when-let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
+          (.setValue codemirror new-code))
         (change-input (Ops.) new-ops)
         nil))))
 
