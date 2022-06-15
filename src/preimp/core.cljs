@@ -337,14 +337,10 @@
                         (dom/dom-node this)
                         #js {:mode "clojure"
                              :lineNumbers false
-                             :extraKeys #js {"Ctrl-Enter" (fn [_] (update-cell cell-id))
-                                             "Shift-Enter" (fn [_]
-                                                             (insert-cell-after cell-id)
-                                                             (update-cell cell-id))
-                                             "Shift-Alt-Enter" (fn [_]
-                                                                 (insert-cell-before cell-id)
-                                                                 (update-cell cell-id))
-                                             "Ctrl-Backspace" (fn [_] (remove-cell cell-id))}
+                             :extraKeys #js {"Ctrl-Enter" #(update-cell cell-id)
+                                             "Shift-Enter" #(insert-cell-after cell-id)
+                                             "Shift-Alt-Enter" #(insert-cell-before cell-id)
+                                             "Ctrl-Backspace" #(remove-cell cell-id)}
                              :matchBrackets true
                              :autofocus (= cell-id (@state :last-inserted))
                              :viewportMargin js/Infinity})]
