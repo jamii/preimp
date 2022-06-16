@@ -8,4 +8,7 @@
   (preimp.core/init-db)
   (preimp.core/read-ops)
   (let [port 3000]
-    (run-jetty #'preimp.core/app {:port port :join? false})))
+    (run-jetty #'preimp.core/app
+               {:port port
+                :join? false
+                :ws-max-text-message-size (* 1024 1024 1024 1)})))
