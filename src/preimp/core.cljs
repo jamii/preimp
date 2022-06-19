@@ -54,7 +54,7 @@
     ;; other id/value pairs that were used to compute this id
     :id->deps {}
 
-    :show-debug-panel? true
+    :show-debug-panel? false
 
     :online-mode? true}))
 
