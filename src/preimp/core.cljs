@@ -156,22 +156,27 @@
     (let [code (:code (compute (CellMap. id)))
           reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
           defs (atom [])]
-      (while (cljs.tools.reader.reader-types.peek-char reader)
+      (loop []
+
          ;; reset gensym ids so repeated reads are always identical
         (reset! cljs.tools.reader.impl.utils/last-id 0)
-        (let [form (cljs.tools.reader.read reader)
-              _ (when-not (list? form)
-                  (throw [:not-list form]))
-              kind (nth form 0 nil)
-              _  (when-not (#{'defs 'def 'defn} kind)
-                   (throw [:bad-kind form]))
-              name (nth form 1 nil)
-              _  (when-not name
-                   (throw [:no-name form]))
-              body (-> form rest rest)
-              _ (when (= (count body) 0)
-                  (throw [:no-body form]))]
-          (swap! defs conj {:cell-id id :form form :kind kind :name name :body body})))
+        (let [form (binding [cljs.tools.reader/*data-readers*
+                             {'inst (fn [date] (new js/Date date))}]
+                     (cljs.tools.reader.read {:eof ::eof} reader))]
+          (when (not= form ::eof)
+            (let [_ (when-not (list? form)
+                      (throw [:not-list form]))
+                  kind (nth form 0 nil)
+                  _  (when-not (#{'defs 'def 'defn} kind)
+                       (throw [:bad-kind form]))
+                  name (nth form 1 nil)
+                  _  (when-not name
+                       (throw [:no-name form]))
+                  body (-> form rest rest)
+                  _ (when (= (count body) 0)
+                      (throw [:no-body form]))]
+              (swap! defs conj {:cell-id id :form form :kind kind :name name :body body})
+              (recur)))))
       (case (count @defs)
         0 (throw [:no-def-in-cell id])
         1 (first @defs)
