@@ -50,10 +50,15 @@
     {:cell-ids cell-ids
      :cell-maps cell-maps}))
 
+(defn migrate-map->AssocOp [map]
+  (if (contains? map :code)
+    (AssocOp. (:version map) (:client map) (:cell-id map) :code (:code map))
+    (map->AssocOp map)))
+
 (def readers
-  {'preimp.state.InsertOp preimp.state/map->InsertOp
-   'preimp.state.DeleteOp preimp.state/map->DeleteOp
-   'preimp.state.AssocOp preimp.state/map->AssocOp})
+  {'preimp.state.InsertOp map->InsertOp
+   'preimp.state.DeleteOp map->DeleteOp
+   'preimp.state.AssocOp migrate-map->AssocOp})
 
 (deftest basic
   (is (= (ops->state #{})
