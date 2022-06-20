@@ -11,7 +11,9 @@
    preimp.state
    clojure.edn
    clojure.set
-   cljs.tools.reader.impl.utils))
+   cljs.tools.reader
+   cljs.tools.reader.impl.utils
+   clojure.string))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -154,7 +156,7 @@
   Incremental
   (compute* [this compute]
     (let [code (:code (compute (CellMap. id)))
-          reader (cljs.tools.reader.reader-types.indexing-push-back-reader code)
+          reader (cljs.tools.reader.reader-types/indexing-push-back-reader code)
           defs (atom [])]
       (loop []
 
@@ -162,7 +164,7 @@
         (reset! cljs.tools.reader.impl.utils/last-id 0)
         (let [form (binding [cljs.tools.reader/*data-readers*
                              {'inst (fn [date] (new js/Date date))}]
-                     (cljs.tools.reader.read {:eof ::eof} reader))]
+                     (cljs.tools.reader/read {:eof ::eof} reader))]
           (when (not= form ::eof)
             (let [_ (when-not (list? form)
                       (throw [:not-list form]))
@@ -397,8 +399,23 @@
     :else
     (throw (str "Not a function: " (pr-str f)))))
 
+(declare edn)
+
+(defn edn-hide [value]
+  (let [hidden (r/atom true)]
+    (fn [value]
+      [:div
+       [:button
+        {:on-click #(swap! hidden not)}
+        (if @hidden "+" "-")]
+       (when-not @hidden
+         (edn value))])))
+
 (defn edn [value]
   (cond
+    (contains? (meta value) :hide)
+    [edn-hide (with-meta value {})]
+
     (fn? value)
     ;; TODO reagent can't tell when a function changes, so this doesn't update nicely
     (let [arg-ixes (range (fn-num-args value))
@@ -473,37 +490,50 @@
                    (recall-or-recompute (Value. (:name parse)))))]
      [edn value])])
 
-(defn toggle-visibility [cell-id old-visibility]
-  (let [new-visibility (case old-visibility
-                         :code-and-output :output
-                         :output :none
-                         :none :code-and-output)
-        old-ops (recall-or-recompute (Ops.))
+(defn set-visibility [cell-id new-visibility]
+  (let [old-ops (recall-or-recompute (Ops.))
         new-ops (preimp.state/assoc-cell old-ops client cell-id :visibility new-visibility)]
     (change-input (Ops.) new-ops)))
 
+(defn visibility-button [cell-id text new-visibility]
+  [:div [:button
+         {:on-click #(set-visibility cell-id new-visibility)}
+         text]])
+
+(defn cell-name [cell-id]
+  (let [props {:on-click #(set-visibility cell-id :code-and-output)}]
+  [:div
+   (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
+     [:span props name]
+     [:span (merge props {:style {:color "grey"}}) "no name"])]))
+
 (defn editor-and-output [cell-id]
   (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
-    [:div
-     [:button
-      {:on-click #(toggle-visibility cell-id visibility)}
-      (case visibility
-        :code-and-output "--"
-        :output "-"
-        :none "+")]
-     (if (= :code-and-output visibility)
+    (conj
+     (case visibility
+       :none
        [:div
-        {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
-                 :padding "0.5em"}}
-        [editor cell-id]]
+        [visibility-button cell-id "+" :output]
+        [cell-name cell-id]]
+
+       :output
        [:div
-        (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
-          [:span name]
-          [:span {:style {:color "grey"}} "no name"])])
-     (when (#{:output :code-and-output} visibility)
-       [:div {:style {:padding "0.5em"}}
-        [output cell-id]])
-     [:div {:style {:padding "1rem"}}]]))
+        [visibility-button cell-id "-" :none]
+        [cell-name cell-id]
+        [:div {:style {:padding "0.5em"}}
+         [output cell-id]]]
+
+       :code-and-output
+       [:div
+        [visibility-button cell-id "-" :none]
+        [visibility-button cell-id "-" :output]
+        [:div
+         {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
+                  :padding "0.5em"}}
+         [editor cell-id]]
+        [:div {:style {:padding "0.5em"}}
+         [output cell-id]]])
+     [:div {:style {:padding "1em"}}])))
 
 (defn debug []
   [:div
