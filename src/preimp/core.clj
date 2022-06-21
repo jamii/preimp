@@ -14,7 +14,8 @@
 (def state
   (atom
    {:ops #{}
-    :client->websocket {}}))
+    :client->websocket {}
+    :client->ops {}}))
 
 ;; --- actions ---
 
@@ -25,39 +26,39 @@
    db
    ["create table if not exists op (edn text)"]))
 
-(defn read-ops []
-  (let [ops (for [row (jdbc/execute! db ["select * from op"])]
-              (clojure.edn/read-string {:readers preimp.state/readers} (:op/edn row)))]
-    (swap! state assoc :ops (preimp.state/compact-ops ops))))
-
 (defn write-ops [ops]
   (doseq [op ops]
     (jdbc/execute! db ["insert into op values (?)" (pr-str op)])))
 
-(defn send-ops [ws]
-  (try
-    (jetty/send! ws (pr-str (@state :ops)))
-    (catch Exception error
-      (prn [:ws-send-error ws error]))))
+(defn read-ops []
+  (let [ops (for [row (jdbc/execute! db ["select * from op"])]
+              (clojure.edn/read-string {:readers preimp.state/readers} (:op/edn row)))]
+    (swap! state update-in [:ops] preimp.state/union-ops ops)))
+
+(defn send-ops []
+  (doseq [[client ws] (@state :client->websocket)]
+    (let [new-ops (get @state :ops)
+          old-ops (get-in @state [:client->ops client])
+          novel-ops (clojure.set/difference new-ops old-ops)]
+      (try
+        (jetty/send! ws (pr-str novel-ops))
+        ;; TODO should really wait for ack
+        (swap! state assoc-in [:client->ops client] new-ops)
+        (catch Exception error
+          (prn [:ws-send-error ws error]))))))
 
 (defn recv-ops [new-ops]
   (let [old-ops (@state :ops)
         novel-ops (clojure.set/difference new-ops old-ops)]
     (write-ops novel-ops)
-    (swap! state update-in [:ops] clojure.set/union new-ops)
-    (swap! state update-in [:ops] preimp.state/compact-ops)
-    old-ops))
+    (swap! state update-in [:ops] preimp.state/union-ops novel-ops)
+    (send-ops)))
 
 (defn recv-ops-from-ws [recv-ws msg-str]
-  (let [msg (clojure.edn/read-string {:readers preimp.state/readers} msg-str)
-        old-ops (recv-ops (:ops msg))]
+  (let [msg (clojure.edn/read-string {:readers preimp.state/readers} msg-str)]
     (swap! state assoc-in [:client->websocket (:client msg)] recv-ws)
-    (when (not= old-ops (:ops msg))
-      (send-ops recv-ws))
-    (when (not= old-ops (@state :ops))
-      (doseq [[client other-ws] (@state :client->websocket)]
-        (when (not= client (:client msg))
-          (send-ops other-ws))))))
+    (swap! state update-in [:client->ops (:client msg)] preimp.state/union-ops (:ops msg))
+    (recv-ops (:ops msg))))
 
 (defn recv-ops-from-put [input-stream]
   (let [msg (json/read-str (slurp input-stream))
@@ -66,11 +67,8 @@
             (java.util.UUID/randomUUID)
             (java.util.UUID/fromString (get msg "cell-id"))
             :code
-            (get msg "value"))
-        old-ops (recv-ops #{op})]
-    (when (not= old-ops (@state :ops))
-      (doseq [[client other-ws] (@state :client->websocket)]
-        (send-ops other-ws)))))
+            (get msg "value"))]
+    (recv-ops #{op})))
 
 ;; --- change polling ---
 
@@ -87,9 +85,7 @@
 (defn read-ops-if-changed []
   (when (db-changed?)
     (read-ops)
-    ;; TODO need to centralize decisions about when to send updates
-    (doseq [[client other-ws] (@state :client->websocket)]
-      (send-ops other-ws))))
+    (send-ops)))
 
 ;; --- handlers ---
 

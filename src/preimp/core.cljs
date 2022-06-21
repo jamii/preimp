@@ -247,31 +247,32 @@
         (let [thunk (compute (Thunk. name))
               args (for [arg (:args thunk)] (compute (Value. arg)))]
           (apply (:thunk thunk) args))))))
-
+          
 (declare send-ops)
 
 (defn change-input [id value]
   (swap! state update-in [:version] inc)
   (swap! state assoc-in [:id->version id] (:version @state))
-  (swap! state assoc-in [:id->value id] value)
-  (when (instance? Ops id)
-    (send-ops)))
+  (swap! state assoc-in [:id->value id] value))
+  
+(defn insert-ops [ops]
+  (let [old-ops (recall-or-recompute (Ops.))
+        version (preimp.state/next-version old-ops)
+        ops (set (for [op ops] (assoc op :version version)))
+        new-ops (preimp.state/union-ops old-ops ops)]
+    (change-input (Ops.) new-ops)
+    (send-ops ops)))
 
 (defn update-cell [cell-id]
-  (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))
-        old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/assoc-cell old-ops client cell-id :code new-value)]
-    (change-input (Ops.) new-ops)))
+  (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))]
+    (insert-ops #{(preimp.state/->AssocOp nil client cell-id :code new-value)})))
 
 (defn insert-cell-after [prev-cell-id]
-  (let [new-cell-id (random-uuid)
-        old-ops (recall-or-recompute (Ops.))
-        new-ops (-> old-ops
-                    (preimp.state/insert-cell client new-cell-id prev-cell-id)
-                    (preimp.state/assoc-cell client new-cell-id :code "")
-                    (preimp.state/assoc-cell client new-cell-id :visibility :code-and-output))]
+  (let [new-cell-id (random-uuid)]
     (swap! state assoc :last-inserted new-cell-id)
-    (change-input (Ops.) new-ops)))
+    (insert-ops #{(preimp.state/->InsertOp nil client new-cell-id prev-cell-id)
+                    (preimp.state/->AssocOp nil client new-cell-id :code "")
+                    (preimp.state/->AssocOp nil client new-cell-id :visibility :code-and-output)})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -280,16 +281,17 @@
     (insert-cell-after prev-cell-id)))
 
 (defn remove-cell [cell-id]
-  (let [old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/remove-cell old-ops client cell-id)]
-    (change-input (Ops.) new-ops)))
+  (insert-ops #{(preimp.state/->DeleteOp nil client cell-id)}))
+  
+(defn set-visibility [cell-id new-visibility]
+  (insert-ops #{(preimp.state/->AssocOp nil client cell-id :visibility new-visibility)}))
 
 ;; --- network ---
 
-(defn send-ops []
-  (d :sending (count (recall-or-recompute (Ops.))))
+(defn send-ops [ops]
+  (d :sending (count ops))
   (try
-    (.send (@state :websocket) (pr-str {:client client :ops (recall-or-recompute (Ops.))}))
+    (.send (@state :websocket) (pr-str {:client client :ops ops}))
     (catch :default error (d :ws-send-error error))))
 
 (declare update-codemirrors)
@@ -304,7 +306,7 @@
     (set! (.-onopen (@state :websocket))
           (fn [_]
             (swap! state assoc :connect-retry-timeout 100)
-            (send-ops)))
+            (send-ops (recall-or-recompute (Ops.)))))
     (set! (.-onmessage (@state :websocket))
           (fn [event]
             (let [old-ops (recall-or-recompute (Ops.))
@@ -490,11 +492,6 @@
                    (recall-or-recompute (Value. (:name parse)))))]
      [edn value])])
 
-(defn set-visibility [cell-id new-visibility]
-  (let [old-ops (recall-or-recompute (Ops.))
-        new-ops (preimp.state/assoc-cell old-ops client cell-id :visibility new-visibility)]
-    (change-input (Ops.) new-ops)))
-
 (defn visibility-button [cell-id text new-visibility]
   [:div [:button
          {:on-click #(set-visibility cell-id new-visibility)}
@@ -585,12 +582,10 @@
       (let [cell-id (:cell-id def)
             old-value (recall-or-recompute (Value. name))
             new-value (apply f old-value args)
-            new-code (pr-str `(~'defs ~name ~new-value))
-            old-ops (recall-or-recompute (Ops.))
-            new-ops (preimp.state/assoc-cell old-ops client cell-id :code new-code)]
+            new-code (pr-str `(~'defs ~name ~new-value))]
         (when-let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
           (.setValue codemirror new-code))
-        (change-input (Ops.) new-ops)
+        (insert-ops (preimp.state/->AssocOp nil client cell-id :code new-code))
         nil))))
 
 ;; --- init ---

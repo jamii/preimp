@@ -1,5 +1,6 @@
 (ns preimp.state
-  (:require [clojure.test :refer [deftest is]]))
+  (:require [clojure.test :refer [deftest is]]
+            clojure.set))
 
 (defn new-cell-id []
   #?(:clj (java.util.UUID/randomUUID)
@@ -11,18 +12,6 @@
 
 (defn next-version [ops]
   (inc (reduce max 0 (for [op ops] (:version op)))))
-
-(defn insert-cell [ops client cell-id prev-cell-id]
-  (conj ops
-        (InsertOp. (next-version ops) client cell-id prev-cell-id)))
-
-(defn remove-cell [ops client cell-id]
-  (conj ops
-        (DeleteOp. (next-version ops) client cell-id)))
-
-(defn assoc-cell [ops client cell-id key value]
-  (conj ops
-        (AssocOp. (next-version ops) client cell-id key value)))
 
 (defn compact-ops [ops]
   (let [removed (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
@@ -39,6 +28,9 @@
                               {}
                               sorted-ops)]
     (into #{} (for [[k op] compacted-ops] op))))
+
+(defn union-ops [a b]
+  (compact-ops (clojure.set/union a b)))
 
 (defn ops->state [ops]
   (let [removed (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
