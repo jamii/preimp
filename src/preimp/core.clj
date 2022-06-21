@@ -42,7 +42,6 @@
           novel-ops (clojure.set/difference new-ops old-ops)]
       (try
         (jetty/send! ws (pr-str novel-ops))
-        ;; TODO should really wait for ack
         (swap! state assoc-in [:client->ops client] new-ops)
         (catch Exception error
           (prn [:ws-send-error ws error]))))))
