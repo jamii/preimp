@@ -571,9 +571,7 @@
      [debug])])
 
 (defn mount-root []
-  (dom/render [app] (.getElementById js/document "app"))
-  ;; for some reason eval fails if we run it during load
-  #_(js/setTimeout #(queue-recall-or-recompute-all) 1))
+  (dom/render [app] (.getElementById js/document "app")))
 
 ;; --- fns exposed to cells ---
 

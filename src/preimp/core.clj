@@ -138,7 +138,7 @@
 (defn app [request]
   ;; this is a hack to make cljs debug builds work with wrap-resource
   (let [request (if (.startsWith (:uri request) "/out")
-                  (assoc request :uri (subs (:uri request) 4))
+                  (assoc request :uri (subs (:uri request) (count "/out")))
                   request)]
     (app-inner request)))
 
