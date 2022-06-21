@@ -28,7 +28,7 @@
 (defn read-ops []
   (let [ops (for [row (jdbc/execute! db ["select * from op"])]
               (clojure.edn/read-string {:readers preimp.state/readers} (:op/edn row)))]
-    (swap! state assoc :ops (into #{} ops))))
+    (swap! state assoc :ops (preimp.state/compact-ops ops))))
 
 (defn write-ops [ops]
   (doseq [op ops]
@@ -45,6 +45,7 @@
         novel-ops (clojure.set/difference new-ops old-ops)]
     (write-ops novel-ops)
     (swap! state update-in [:ops] clojure.set/union new-ops)
+    (swap! state update-in [:ops] preimp.state/compact-ops)
     old-ops))
 
 (defn recv-ops-from-ws [recv-ws msg-str]

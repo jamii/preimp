@@ -502,10 +502,10 @@
 
 (defn cell-name [cell-id]
   (let [props {:on-click #(set-visibility cell-id :code-and-output)}]
-  [:div
-   (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
-     [:span props name]
-     [:span (merge props {:style {:color "grey"}}) "no name"])]))
+    [:div
+     (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
+       [:span props name]
+       [:span (merge props {:style {:color "grey"}}) "no name"])]))
 
 (defn editor-and-output [cell-id]
   (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
