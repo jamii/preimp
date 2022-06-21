@@ -312,7 +312,7 @@
                               {:readers preimp.state/readers}
                               (.-data event))
                   _ (d :receiving (count server-ops))
-                  new-ops (clojure.set/union old-ops server-ops)]
+                  new-ops (preimp.state/compact-ops (clojure.set/union old-ops server-ops))]
               (when (not= old-ops new-ops)
                 (change-input (Ops.) new-ops)
                 (update-codemirrors)))))
