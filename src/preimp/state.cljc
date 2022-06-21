@@ -25,16 +25,20 @@
         (AssocOp. (next-version ops) client cell-id key value)))
 
 (defn compact-ops [ops]
-  (let [sorted-ops (sort-by (fn [op] [(:version op) (:client op)]) ops)
+  (let [removed (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
+        inserted (set (for [op ops :when (instance? InsertOp op) :when (not (removed (:cell-id op)))] (:cell-id op)))
+        sorted-ops (sort-by (fn [op] [(:version op) (:client op)]) ops)
         compacted-ops (reduce (fn [key->op op]
-                                (let [key (cond
-                                            (instance? InsertOp op) (assoc op :version nil)
-                                            (instance? DeleteOp op) (assoc op :version nil)
-                                            (instance? AssocOp op) (assoc op :version nil :value nil))]
-                                  (assoc key->op key op)))
+                                (if (or (not (instance? AssocOp op)) (inserted (:cell-id op)))
+                                  (let [key (cond
+                                              (instance? InsertOp op) (:cell-id op)
+                                              (instance? DeleteOp op) (:cell-id op)
+                                              (instance? AssocOp op) [(:cell-id op) (:key op)])]
+                                    (assoc key->op key op))
+                                  key->op))
                               {}
                               sorted-ops)]
-    (into #{} (for [[k v] compacted-ops] v))))
+    (into #{} (for [[k op] compacted-ops] op))))
 
 (defn ops->state [ops]
   (let [removed (set (for [op ops :when (instance? DeleteOp op)] (:cell-id op)))
