@@ -4,7 +4,5 @@ set -euxo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 
-rm -rf ./out
-clj -M --main cljs.main --optimizations simple --compile preimp.core
-clj -T:build build/uber
+clj -T:build build/prod
 nixops deploy -d preimp

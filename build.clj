@@ -10,18 +10,17 @@
 (def basis (b/create-basis {:project "deps.edn"}))
 (def uber-file (format "target/%s-%s-standalone.jar" (name lib) version))
 
-(defn compile-cljs [_]
+(defn prod [_]
   (b/delete {:path "out"})
-  (let [t0 (System/currentTimeMillis)]
-    (cljs/build (io/file "src")
-                {:optimizations   :none
-                 :closure-defines {"goog.DEBUG" false}
-                 :parallel-build  true})
-    (println "[package] Compiled cljs in" (- (System/currentTimeMillis) t0) "ms")))
-
-(defn uber [_]
   (b/delete {:path "target"})
-  (b/copy-dir {:src-dirs (:paths basis)
+  (b/copy-dir {:src-dirs ["src"]
+               :target-dir class-dir})
+  (cljs/build (cljs/inputs "src")
+              {:output-to "out/main.js"
+               :output-dir "out/"
+               :optimizations :simple
+               :compiler-stats true})
+  (b/copy-dir {:src-dirs ["out"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :src-dirs ["src"]
@@ -30,7 +29,3 @@
            :uber-file uber-file
            :basis basis
            :main 'preimp.server}))
-
-(defn all [_]
-  (compile-cljs nil)
-  (uber nil))

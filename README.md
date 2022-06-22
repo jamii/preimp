@@ -22,8 +22,7 @@ clj -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
 Build (prod):
 
 ``` bash
-clj -M --main cljs.main --optimizations simple --compile preimp.core
-clj -T:build build/uber
+clj -T:build build/prod
 ```
 
 Serve (prod):
