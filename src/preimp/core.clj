@@ -40,11 +40,12 @@
     (let [new-ops (get @state :ops)
           old-ops (get-in @state [:client->ops client])
           novel-ops (clojure.set/difference new-ops old-ops)]
-      (try
-        (jetty/send! ws (pr-str novel-ops))
-        (swap! state assoc-in [:client->ops client] new-ops)
-        (catch Exception error
-          (prn [:ws-send-error ws error]))))))
+      (when-not (empty? novel-ops)
+        (try
+          (jetty/send! ws (pr-str novel-ops))
+          (swap! state assoc-in [:client->ops client] new-ops)
+          (catch Exception error
+            (prn [:ws-send-error ws error])))))))
 
 (defn recv-ops [new-ops]
   (let [old-ops (@state :ops)
