@@ -5,8 +5,7 @@
    cljsjs.codemirror.mode.clojure
    cljsjs.codemirror.addon.edit.matchbrackets
    cljsjs.codemirror.addon.comment.comment
-   [reagent.dom :as dom]
-   [reagent.core :as r]
+   [rum.core :as rum]
    cljs.js
    preimp.state
    clojure.edn
@@ -25,7 +24,7 @@
 (def client (atom (random-uuid)))
 
 (def state
-  (r/atom
+  (atom
    {:websocket nil
 
     :connect-retry-timeout 100
@@ -247,14 +246,14 @@
         (let [thunk (compute (Thunk. name))
               args (for [arg (:args thunk)] (compute (Value. arg)))]
           (apply (:thunk thunk) args))))))
-          
+
 (declare send-ops)
 
 (defn change-input [id value]
   (swap! state update-in [:version] inc)
   (swap! state assoc-in [:id->version id] (:version @state))
   (swap! state assoc-in [:id->value id] value))
-  
+
 (defn insert-ops [ops]
   (let [old-ops (recall-or-recompute (Ops.))
         version (preimp.state/next-version old-ops)
@@ -271,8 +270,8 @@
   (let [new-cell-id (random-uuid)]
     (swap! state assoc :last-inserted new-cell-id)
     (insert-ops #{(preimp.state/->InsertOp nil @client new-cell-id prev-cell-id)
-                    (preimp.state/->AssocOp nil @client new-cell-id :code "")
-                    (preimp.state/->AssocOp nil @client new-cell-id :visibility :code-and-output)})))
+                  (preimp.state/->AssocOp nil @client new-cell-id :code "")
+                  (preimp.state/->AssocOp nil @client new-cell-id :visibility :code-and-output)})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -282,7 +281,7 @@
 
 (defn remove-cell [cell-id]
   (insert-ops #{(preimp.state/->DeleteOp nil @client cell-id)}))
-  
+
 (defn set-visibility [cell-id new-visibility]
   (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :visibility new-visibility)}))
 
@@ -335,44 +334,53 @@
 
 ;; --- gui ---
 
-(defn editor [cell-id]
-  (r/create-class
-   {:render
-    (fn [] [:textarea])
+#_(rum/set-warn-on-interpretation! true)
 
-    :component-did-mount
-    (fn [this]
-      (let [value (:code (recall-or-recompute (CellMap. cell-id)))
-            codemirror (.fromTextArea
-                        js/CodeMirror
-                        (dom/dom-node this)
-                        #js {:mode "clojure"
-                             :lineNumbers false
-                             :extraKeys #js {"Ctrl-Enter" #(update-cell cell-id)
-                                             "Shift-Enter" #(insert-cell-after cell-id)
-                                             "Shift-Alt-Enter" #(insert-cell-before cell-id)
-                                             "Ctrl-Backspace" #(remove-cell cell-id)}
-                             :matchBrackets true
-                             :autofocus (= cell-id (@state :last-inserted))
-                             :viewportMargin js/Infinity})]
-        (.on codemirror "changes" (fn [_]
-                                    (swap! state assoc-in [:code-now cell-id] (.getValue codemirror))))
-        (.on codemirror "blur" (fn [_]
-                                 (when (not= ((@state :code-now) cell-id) ((@state :code-at-focus) cell-id))
-                                   (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))
-                                   (update-cell cell-id))))
-        (.on codemirror "focus" (fn [_]
-                                  (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))))
-        (swap! state assoc-in [:cell-id->codemirror cell-id] codemirror)
-        (swap! state assoc-in [:code-at-focus cell-id] value)
-        (swap! state assoc-in [:code-now cell-id] value)
-        (.setValue codemirror value)))
+(def editor-mixin
+  {:did-mount
+   (fn [rum-state]
+     (let [component (:rum/react-component rum-state)
+           dom-node (js/ReactDOM.findDOMNode component)
+           [cell-id] (:rum/args rum-state)
+           value (:code (recall-or-recompute (CellMap. cell-id)))
+           codemirror (.fromTextArea
+                       js/CodeMirror
+                       dom-node
+                       #js {:mode "clojure"
+                            :lineNumbers false
+                            :extraKeys #js {"Ctrl-Enter" #(update-cell cell-id)
+                                            "Shift-Enter" #(insert-cell-after cell-id)
+                                            "Shift-Alt-Enter" #(insert-cell-before cell-id)
+                                            "Ctrl-Backspace" #(remove-cell cell-id)}
+                            :matchBrackets true
+                            :autofocus (= cell-id (@state :last-inserted))
+                            :viewportMargin js/Infinity})]
+       (.on codemirror "changes" (fn [_]
+                                   (swap! state assoc-in [:code-now cell-id] (.getValue codemirror))))
+       (.on codemirror "blur" (fn [_]
+                                (when (not= ((@state :code-now) cell-id) ((@state :code-at-focus) cell-id))
+                                  (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))
+                                  (update-cell cell-id))))
+       (.on codemirror "focus" (fn [_]
+                                 (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))))
+       (swap! state assoc-in [:cell-id->codemirror cell-id] codemirror)
+       (swap! state assoc-in [:code-at-focus cell-id] value)
+       (swap! state assoc-in [:code-now cell-id] value)
+       (.setValue codemirror value)
+       rum-state))
 
-    :component-will-unmount
-    (fn [this]
-      (let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
-        (swap! state update-in [:cell-id->codemirror] dissoc cell-id)
-        (.toTextArea codemirror)))}))
+   :will-unmount
+   (fn [rum-state]
+     (let [[cell-id] (:rum/args rum-state)
+           codemirror (get-in @state [:cell-id->codemirror cell-id])]
+       (swap! state update-in [:cell-id->codemirror] dissoc cell-id)
+       (.toTextArea codemirror)
+       rum-state))})
+
+(rum/defc editor <
+  editor-mixin
+  [cell-id]
+  [:textarea])
 
 (defn update-codemirrors []
   (doseq [[cell-id code-mirror] (@state :cell-id->codemirror)
@@ -405,45 +413,55 @@
 
 (declare edn)
 
-(defn edn-hide [value]
-  (let [hidden (r/atom true)]
-    (fn [value]
-      [:div
-       [:button
-        {:on-click #(swap! hidden not)}
-        (if @hidden "+" "-")]
-       (when-not @hidden
-         (edn value))])))
+(rum/defcs edn-hide <
+  rum/static
+  (rum/local true ::hidden)
+  [local-state value]
+  (let [hidden (::hidden local-state)]
+    [:div
+     [:button
+      {:on-click #(swap! hidden not)}
+      (if @hidden "+" "-")]
+     (when-not @hidden
+       (edn value))]))
 
-(defn edn [value]
+(rum/defcs edn-fn <
+  rum/static
+  (rum/local nil ::args)
+  (rum/local nil ::output)
+  [local-state value]
+  (let [arg-ixes (range (fn-num-args value))
+        args (::args local-state)
+        output (::output local-state)]
+    (reset! args (into [] (for [_ arg-ixes] "")))
+    [:form
+     {:action "function () {}"}
+     (doall (for [[arg-ix arg] (map vector arg-ixes @args)]
+              [:input
+               {:key arg-ix
+                :type "text"
+                :value arg
+                :on-change (fn [event] (swap! args assoc arg-ix (-> event .-target .-value)))}]))
+     [:button
+      {:on-click (fn [event]
+                   (reset! output
+                           (try (apply value (for [arg @args]
+                                               (clojure.edn/read-string arg)))
+                                (catch :default err (Error. err))))
+                   (.preventDefault event))}
+      (fn-name value)]
+     (when @output
+       (edn @output))]))
+
+(rum/defc edn <
+  rum/static
+  [value]
   (cond
     (contains? (meta value) :hide)
-    [edn-hide (with-meta value {})]
+    (edn-hide (with-meta value {}))
 
     (fn? value)
-    ;; TODO reagent can't tell when a function changes, so this doesn't update nicely
-    (let [arg-ixes (range (fn-num-args value))
-          args (into [] (for [_ arg-ixes] (r/atom "")))
-          output (r/atom nil)]
-      (fn [value]
-        [:form
-         {:action "function () {}"}
-         (doall (for [[arg-ix arg] (map vector arg-ixes args)]
-                  ^{:key arg-ix}
-                  [:input
-                   {:type "text"
-                    :value @arg
-                    :on-change (fn [event] (reset! arg (-> event .-target .-value)))}]))
-         [:button
-          {:on-click (fn [event]
-                       (reset! output
-                               (try (apply value (for [arg args]
-                                                   (clojure.edn/read-string @arg)))
-                                    (catch :default err (Error. err))))
-                       (.preventDefault event))}
-          (fn-name value)]
-         (when @output
-           [edn @output])]))
+    (edn-fn value)
 
     (map? value)
     (let [value (try (sort value) (catch :default _ value))]
@@ -453,11 +471,11 @@
                 :border-radius "0.5em"
                 :padding "0.5em"}}
        [:tbody
-        (for [[k v] value]
-          ^{:key (pr-str k)}
+        (for [[[k v] i] (map vector value (range))]
           [:tr
-           [:td [edn k]]
-           [:td [edn v]]])]])
+           {:key i}
+           [:td (edn k)]
+           [:td (edn v)]])]])
 
     (vector? value)
     [:table
@@ -467,9 +485,9 @@
               :padding "0.5em"}}
      [:tbody
       (for [[elem i] (map vector value (range))]
-        ^{:key i}
         [:tr
-         [:td [edn elem]]])]]
+         {:key i}
+         [:td (edn elem)]])]]
 
     (set? value)
     (let [value (try (sort value) (catch :default _ value))]
@@ -480,79 +498,88 @@
                 :padding "0.5em"}}
        [:tbody
         (for [[elem i] (map vector value (range))]
-          ^{:key i}
           [:tr
-           [:td [edn elem]]])]])
+           {:key i}
+           [:td (edn elem)]])]])
+
     :else
     [:code (pr-str value)]))
 
-(defn output [cell-id]
+(rum/defc output <
+  [cell-id]
   [:div
    (let [value (let [parse (recall-or-recompute (CellParse. cell-id))]
                  (if (instance? Error parse)
                    parse
                    (recall-or-recompute (Value. (:name parse)))))]
-     [edn value])])
+     (edn value))])
 
-(defn visibility-button [cell-id text new-visibility]
+(rum/defc visibility-button <
+  [cell-id text new-visibility]
   [:div [:button
          {:on-click #(set-visibility cell-id new-visibility)}
          text]])
 
-(defn cell-name [cell-id]
+(rum/defc cell-name <
+  [cell-id]
   (let [props {:on-click #(set-visibility cell-id :code-and-output)}]
     [:div
      (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
-       [:span props name]
+       [:span props (str name)]
        [:span (merge props {:style {:color "grey"}}) "no name"])]))
 
-(defn editor-and-output [cell-id]
+(rum/defc editor-and-output <
+  [cell-id]
   (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
     (conj
      (case visibility
        :none
        [:div
-        [visibility-button cell-id "+" :output]
-        [cell-name cell-id]]
+        (visibility-button cell-id "+" :output)
+        (cell-name cell-id)]
 
        :output
        [:div
-        [visibility-button cell-id "-" :none]
-        [cell-name cell-id]
+        (visibility-button cell-id "-" :none)
+        (cell-name cell-id)
         [:div {:style {:padding "0.5em"}}
-         [output cell-id]]]
+         (output cell-id)]]
 
        :code-and-output
        [:div
-        [visibility-button cell-id "-" :none]
-        [visibility-button cell-id "-" :output]
+        (visibility-button cell-id "-" :none)
+        (visibility-button cell-id "-" :output)
         [:div
          {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
                   :padding "0.5em"}}
-         [editor cell-id]]
+         (editor cell-id)]
         [:div {:style {:padding "0.5em"}}
-         [output cell-id]]])
+         (output cell-id)]])
      [:div {:style {:padding "1em"}}])))
 
-(defn debug []
+(rum/defc debug
+  []
   [:div
    (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
             (let [color (if (instance? Error value) "red" "black")]
-              ^{:key (pr-str id)} [:div
-                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-                                   " "
-                                   [:span {:style {:font-weight "bold"}} (pr-str id)]
-                                   " "
-                                   [:span {:style {:color color}} (pr-str value)]
-                                   " "
-                                   [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
+              {:key (pr-str id)}
+              [:div
+               [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+               " "
+               [:span {:style {:font-weight "bold"}} (pr-str id)]
+               " "
+               [:span {:style {:color color}} (pr-str value)]
+               " "
+               [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
 
-(defn app []
+(rum/defcs app <
+  rum/reactive
+  [rum-state]
+  (rum/react state)
   [:div
    [:div (for [cell-id (recall-or-recompute (CellIds.))]
-           ^{:key cell-id} [editor-and-output cell-id])]
+           (rum/with-key (editor-and-output cell-id) cell-id))]
    [:button
-
     {:on-click (fn []
                  (swap! state update-in [:online-mode?] not)
                  (if (@state :online-mode?)
@@ -567,11 +594,14 @@
    [:button
     {:on-click #(swap! state update-in [:show-debug-panel?] not)}
     (if (@state :show-debug-panel?) "close debug panel" "show debug panel")]
+   [:button
+    {:on-click #(rum/request-render (:rum/react-component rum-state))}
+    "rerender"]
    (when (@state :show-debug-panel?)
-     [debug])])
+     (debug))])
 
 (defn mount-root []
-  (dom/render [app] (.getElementById js/document "app")))
+  (rum/mount (app) (.getElementById js/document "app")))
 
 ;; --- fns exposed to cells ---
 
