@@ -411,60 +411,7 @@
     :else
     (throw (str "Not a function: " (pr-str f)))))
 
-(declare edn-hide)
-(declare edn-fn)
-
-(rum/defc edn <
-  rum/static
-  [value]
-  (cond
-    (contains? (meta value) :hide)
-    (edn-hide (with-meta value {}))
-
-    (fn? value)
-    (edn-fn value)
-
-    (map? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[[k v] i] (map vector value (range))]
-          [:tr
-           {:key (str i)}
-           [:td (edn k)]
-           [:td (edn v)]])]])
-
-    (vector? value)
-    [:table
-     {:style {:border-left "1px solid black"
-              :border-right "1px solid black"
-              :border-radius "0"
-              :padding "0.5em"}}
-     [:tbody
-      (for [[elem i] (map vector value (range))]
-        [:tr
-         {:key (str i)}
-         [:td (edn elem)]])]]
-
-    (set? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[elem i] (map vector value (range))]
-          [:tr
-           {:key (str i)}
-           [:td (edn elem)]])]])
-
-    :else
-    [:code (pr-str value)]))
+(rum/defc edn [])
 
 (rum/defcs edn-hide <
   rum/static
@@ -505,6 +452,78 @@
       (str (fn-name value))]
      (when @output
        (edn @output))]))
+
+(rum/defc edn-map <
+  rum/static
+  [value]
+  (let [value (try (sort value) (catch :default _ value))]
+    [:table
+     {:style {:border-left "1px solid black"
+              :border-right "1px solid black"
+              :border-radius "0.5em"
+              :padding "0.5em"}}
+     [:tbody
+      (for [[[k v] i] (map vector value (range))]
+        [:tr
+         {:key (str i)}
+         [:td (edn k)]
+         [:td (edn v)]])]]))
+
+(rum/defc edn-vector <
+  rum/static
+  [value]
+  [:table
+   {:style {:border-left "1px solid black"
+            :border-right "1px solid black"
+            :border-radius "0"
+            :padding "0.5em"}}
+   [:tbody
+    (for [[elem i] (map vector value (range))]
+      [:tr
+       {:key (str i)}
+       [:td (edn elem)]])]])
+
+(rum/defc edn-set <
+  rum/static
+  [value]
+  (let [value (try (sort value) (catch :default _ value))]
+    [:table
+     {:style {:border-left "1px solid black"
+              :border-right "1px solid black"
+              :border-radius "0.5em"
+              :padding "0.5em"}}
+     [:tbody
+      (for [[elem i] (map vector value (range))]
+        [:tr
+         {:key (str i)}
+         [:td (edn elem)]])]]))
+
+(rum/defc edn-default <
+  rum/static
+  [value]
+  [:code (pr-str value)])
+
+(rum/defc edn <
+  rum/static
+  [value]
+  (cond
+    (contains? (meta value) :hide)
+    (edn-hide (with-meta value {}))
+
+    (fn? value)
+    (edn-fn value)
+
+    (map? value)
+    (edn-map value)
+
+    (vector? value)
+    (edn-vector value)
+
+    (set? value)
+    (edn-set value)
+
+    :else
+    (edn-default value)))
 
 (rum/defc output <
   [cell-id]
