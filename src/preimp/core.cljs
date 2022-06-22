@@ -433,7 +433,7 @@
   (let [arg-ixes (range (fn-num-args value))
         args (::args local-state)
         output (::output local-state)]
-    (reset! args (into [] (for [_ arg-ixes] "")))
+    (when-not @args (reset! args (into [] (for [_ arg-ixes] ""))))
     [:form
      {:action "function () {}"}
      (for [[arg-ix arg] (map vector arg-ixes @args)]
