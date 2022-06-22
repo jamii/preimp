@@ -247,14 +247,14 @@
         (let [thunk (compute (Thunk. name))
               args (for [arg (:args thunk)] (compute (Value. arg)))]
           (apply (:thunk thunk) args))))))
-          
+
 (declare send-ops)
 
 (defn change-input [id value]
   (swap! state update-in [:version] inc)
   (swap! state assoc-in [:id->version id] (:version @state))
   (swap! state assoc-in [:id->value id] value))
-  
+
 (defn insert-ops [ops]
   (let [old-ops (recall-or-recompute (Ops.))
         version (preimp.state/next-version old-ops)
@@ -271,8 +271,8 @@
   (let [new-cell-id (random-uuid)]
     (swap! state assoc :last-inserted new-cell-id)
     (insert-ops #{(preimp.state/->InsertOp nil @client new-cell-id prev-cell-id)
-                    (preimp.state/->AssocOp nil @client new-cell-id :code "")
-                    (preimp.state/->AssocOp nil @client new-cell-id :visibility :code-and-output)})))
+                  (preimp.state/->AssocOp nil @client new-cell-id :code "")
+                  (preimp.state/->AssocOp nil @client new-cell-id :visibility :code-and-output)})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -282,7 +282,7 @@
 
 (defn remove-cell [cell-id]
   (insert-ops #{(preimp.state/->DeleteOp nil @client cell-id)}))
-  
+
 (defn set-visibility [cell-id new-visibility]
   (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :visibility new-visibility)}))
 
@@ -403,22 +403,18 @@
     :else
     (throw (str "Not a function: " (pr-str f)))))
 
-(declare edn)
-
-(defn edn-hide [value]
-  (let [hidden (r/atom true)]
-    (fn [value]
-      [:div
-       [:button
-        {:on-click #(swap! hidden not)}
-        (if @hidden "+" "-")]
-       (when-not @hidden
-         (edn value))])))
-
 (defn edn [value]
   (cond
     (contains? (meta value) :hide)
-    [edn-hide (with-meta value {})]
+    (let [hidden (r/atom true)]
+      (fn [value]
+        (let [value (with-meta value (dissoc (meta value) :hide))]
+          [:div
+           [:button
+            {:on-click #(swap! hidden not)}
+            (if @hidden "+" "-")]
+           (when-not @hidden
+             (edn value))])))
 
     (fn? value)
     ;; TODO reagent can't tell when a function changes, so this doesn't update nicely
