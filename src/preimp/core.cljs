@@ -334,7 +334,7 @@
 
 ;; --- gui ---
 
-#_(rum/set-warn-on-interpretation! true)
+(rum/set-warn-on-interpretation! true)
 
 (def editor-mixin
   {:did-mount
@@ -411,7 +411,60 @@
     :else
     (throw (str "Not a function: " (pr-str f)))))
 
-(declare edn)
+(declare edn-hide)
+(declare edn-fn)
+
+(rum/defc edn <
+  rum/static
+  [value]
+  (cond
+    (contains? (meta value) :hide)
+    (edn-hide (with-meta value {}))
+
+    (fn? value)
+    (edn-fn value)
+
+    (map? value)
+    (let [value (try (sort value) (catch :default _ value))]
+      [:table
+       {:style {:border-left "1px solid black"
+                :border-right "1px solid black"
+                :border-radius "0.5em"
+                :padding "0.5em"}}
+       [:tbody
+        (for [[[k v] i] (map vector value (range))]
+          [:tr
+           {:key (str i)}
+           [:td (edn k)]
+           [:td (edn v)]])]])
+
+    (vector? value)
+    [:table
+     {:style {:border-left "1px solid black"
+              :border-right "1px solid black"
+              :border-radius "0"
+              :padding "0.5em"}}
+     [:tbody
+      (for [[elem i] (map vector value (range))]
+        [:tr
+         {:key (str i)}
+         [:td (edn elem)]])]]
+
+    (set? value)
+    (let [value (try (sort value) (catch :default _ value))]
+      [:table
+       {:style {:border-left "1px solid black"
+                :border-right "1px solid black"
+                :border-radius "0.5em"
+                :padding "0.5em"}}
+       [:tbody
+        (for [[elem i] (map vector value (range))]
+          [:tr
+           {:key (str i)}
+           [:td (edn elem)]])]])
+
+    :else
+    [:code (pr-str value)]))
 
 (rum/defcs edn-hide <
   rum/static
@@ -436,12 +489,12 @@
     (reset! args (into [] (for [_ arg-ixes] "")))
     [:form
      {:action "function () {}"}
-     (doall (for [[arg-ix arg] (map vector arg-ixes @args)]
-              [:input
-               {:key arg-ix
-                :type "text"
-                :value arg
-                :on-change (fn [event] (swap! args assoc arg-ix (-> event .-target .-value)))}]))
+     (for [[arg-ix arg] (map vector arg-ixes @args)]
+       [:input
+        {:key arg-ix
+         :type "text"
+         :value arg
+         :on-change (fn [event] (swap! args assoc arg-ix (-> event .-target .-value)))}])
      [:button
       {:on-click (fn [event]
                    (reset! output
@@ -449,128 +502,77 @@
                                                (clojure.edn/read-string arg)))
                                 (catch :default err (Error. err))))
                    (.preventDefault event))}
-      (fn-name value)]
+      (str (fn-name value))]
      (when @output
        (edn @output))]))
 
-(rum/defc edn <
-  rum/static
-  [value]
-  (cond
-    (contains? (meta value) :hide)
-    (edn-hide (with-meta value {}))
-
-    (fn? value)
-    (edn-fn value)
-
-    (map? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[[k v] i] (map vector value (range))]
-          [:tr
-           {:key i}
-           [:td (edn k)]
-           [:td (edn v)]])]])
-
-    (vector? value)
-    [:table
-     {:style {:border-left "1px solid black"
-              :border-right "1px solid black"
-              :border-radius "0"
-              :padding "0.5em"}}
-     [:tbody
-      (for [[elem i] (map vector value (range))]
-        [:tr
-         {:key i}
-         [:td (edn elem)]])]]
-
-    (set? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[elem i] (map vector value (range))]
-          [:tr
-           {:key i}
-           [:td (edn elem)]])]])
-
-    :else
-    [:code (pr-str value)]))
-
 (rum/defc output <
   [cell-id]
-  [:div
-   (let [value (let [parse (recall-or-recompute (CellParse. cell-id))]
-                 (if (instance? Error parse)
-                   parse
-                   (recall-or-recompute (Value. (:name parse)))))]
-     (edn value))])
+  (let [value (let [parse (recall-or-recompute (CellParse. cell-id))]
+                (if (instance? Error parse)
+                  parse
+                  (recall-or-recompute (Value. (:name parse)))))]
+    [:div (edn value)]))
 
 (rum/defc visibility-button <
   [cell-id text new-visibility]
   [:div [:button
          {:on-click #(set-visibility cell-id new-visibility)}
-         text]])
+         (str text)]])
 
 (rum/defc cell-name <
   [cell-id]
-  (let [props {:on-click #(set-visibility cell-id :code-and-output)}]
+  (let [name (:name (recall-or-recompute (CellParse. cell-id)))]
     [:div
-     (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
-       [:span props (str name)]
-       [:span (merge props {:style {:color "grey"}}) "no name"])]))
+     [:span
+      {:on-click #(set-visibility cell-id :code-and-output)
+       :style {:color (if name "black" "grey")}}
+      (if name (str name) "no name")]]))
 
 (rum/defc editor-and-output <
   [cell-id]
   (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
-    (conj
-     (case visibility
-       :none
-       [:div
-        (visibility-button cell-id "+" :output)
-        (cell-name cell-id)]
+    (case visibility
+      :none
+      [:div
+       (visibility-button cell-id "+" :output)
+       (cell-name cell-id)
+       [:div {:style {:padding "1em"}}]]
 
-       :output
-       [:div
-        (visibility-button cell-id "-" :none)
-        (cell-name cell-id)
-        [:div {:style {:padding "0.5em"}}
-         (output cell-id)]]
+      :output
+      [:div
+       (visibility-button cell-id "-" :none)
+       (cell-name cell-id)
+       [:div {:style {:padding "0.5em"}}
+        (output cell-id)]
+       [:div {:style {:padding "1em"}}]]
 
-       :code-and-output
+      :code-and-output
+      [:div
+       (visibility-button cell-id "-" :none)
+       (visibility-button cell-id "-" :output)
        [:div
-        (visibility-button cell-id "-" :none)
-        (visibility-button cell-id "-" :output)
-        [:div
-         {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
-                  :padding "0.5em"}}
-         (editor cell-id)]
-        [:div {:style {:padding "0.5em"}}
-         (output cell-id)]])
-     [:div {:style {:padding "1em"}}])))
+        {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
+                 :padding "0.5em"}}
+        (editor cell-id)]
+       [:div {:style {:padding "0.5em"}}
+        (output cell-id)]
+       [:div {:style {:padding "1em"}}]])))
 
 (rum/defc debug
   []
   [:div
-   (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
-            (let [color (if (instance? Error value) "red" "black")]
-              {:key (pr-str id)}
-              [:div
-               [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
-               " "
-               [:span {:style {:font-weight "bold"}} (pr-str id)]
-               " "
-               [:span {:style {:color color}} (pr-str value)]
-               " "
-               [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
+   (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
+     (let [color (if (instance? Error value) "red" "black")]
+       {:key (pr-str id)}
+       [:div
+        [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+        " "
+        [:span {:style {:font-weight "bold"}} (pr-str id)]
+        " "
+        [:span {:style {:color color}} (pr-str value)]
+        " "
+        [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]]))])
 
 (rum/defcs app <
   rum/reactive
