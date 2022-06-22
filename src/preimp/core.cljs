@@ -585,7 +585,7 @@
             new-code (pr-str `(~'defs ~name ~new-value))]
         (when-let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
           (.setValue codemirror new-code))
-        (insert-ops (preimp.state/->AssocOp nil @client cell-id :code new-code))
+        (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :code new-code)})
         nil))))
 
 ;; --- init ---
