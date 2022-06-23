@@ -26,22 +26,21 @@
 
 (def state
   (r/atom
-   {:websocket nil
+   {;; --- network state ----
+
+    :websocket nil
 
     :connect-retry-timeout 100
 
-    ;; the codemirror object for each cell
-    :cell-id->codemirror {}
+    ;; --- gui state ---
 
-    ;; code that was in each codemirror when it was last focused
-    :code-at-focus {}
+    :focused-cell-id nil
 
-    ;; code that is currently in each codemirror
-    :code-now {}
+    :show-debug-panel? false
 
-    ;; cell-id that was most recently inserted
-    ;; (used for autofocus on mount)
-    :last-inserted nil
+    :online-mode? true
+
+    ;; --- incremental eval state ---
 
     ;; version increments on every change made from the outside
     :version 0
@@ -57,11 +56,9 @@
     :id->last-checked-at-version {(Ops.) 0}
 
     ;; the ids that were used during the last compute of this id
-    :id->deps {}
+    :id->deps {}}))
 
-    :show-debug-panel? false
-
-    :online-mode? true}))
+(add-watch state ::test (fn [_ _ _ new-state] (assert new-state)))
 
 ;; --- compiler stuff ---
 
@@ -99,12 +96,12 @@
 (declare recall-or-recompute)
 
 (defn deps-changed? [id]
-     (let [last-checked (get-in @state [:id->last-checked-at-version id])]
-       (some
-        (fn [dep-id]
-          (recall-or-recompute dep-id)
-          (> (get-in @state [:id->last-changed-at-version dep-id]) last-checked))
-        (get-in @state [:id->deps id]))))
+  (let [last-checked (get-in @state [:id->last-checked-at-version id])]
+    (some
+     (fn [dep-id]
+       (recall-or-recompute dep-id)
+       (> (get-in @state [:id->last-changed-at-version dep-id]) last-checked))
+     (get-in @state [:id->deps id]))))
 
 (defn stale? [id]
   (or
@@ -270,16 +267,15 @@
     (change-input (Ops.) new-ops)
     (send-ops ops)))
 
-(defn update-cell [cell-id]
-  (let [new-value (.getValue (get (@state :cell-id->codemirror) cell-id))]
-    (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :code new-value)})))
+(defn set-cell-code [cell-id code]
+  (when (not= code (:code (recall-or-recompute (CellMap. cell-id))))
+    (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :code code)})))
 
 (defn insert-cell-after [prev-cell-id]
   (let [new-cell-id (random-uuid)]
-    (swap! state assoc :last-inserted new-cell-id)
+    (swap! state assoc :focused-cell-id new-cell-id)
     (insert-ops #{(preimp.state/->InsertOp nil @client new-cell-id prev-cell-id)
-                  (preimp.state/->AssocOp nil @client new-cell-id :code "")
-                  (preimp.state/->AssocOp nil @client new-cell-id :visibility :code-and-output)})))
+                  (preimp.state/->AssocOp nil @client new-cell-id :code "")})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -288,10 +284,11 @@
     (insert-cell-after prev-cell-id)))
 
 (defn remove-cell [cell-id]
-  (insert-ops #{(preimp.state/->DeleteOp nil @client cell-id)}))
-
-(defn set-visibility [cell-id new-visibility]
-  (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :visibility new-visibility)}))
+  (let [cell-ids (recall-or-recompute (CellIds.))
+        ix (.indexOf cell-ids cell-id)
+        prev-cell-id (if (= ix 0) nil (get cell-ids (dec ix)))]
+    (insert-ops #{(preimp.state/->DeleteOp nil @client cell-id)})
+    (swap! state assoc :focused-cell-id prev-cell-id)))
 
 ;; --- network ---
 
@@ -300,8 +297,6 @@
   (try
     (.send (@state :websocket) (pr-str {:client @client :ops ops}))
     (catch :default error (d :ws-send-error error))))
-
-(declare update-codemirrors)
 
 (defn connect []
   (when (@state :online-mode?)
@@ -325,8 +320,7 @@
                   _ (d :receiving (count server-ops))
                   new-ops (preimp.state/compact-ops (clojure.set/union old-ops server-ops))]
               (when (not= old-ops new-ops)
-                (change-input (Ops.) new-ops)
-                (update-codemirrors)))))
+                (change-input (Ops.) new-ops)))))
     (set! (.-onerror (@state :websocket))
           (fn [error]
             (d :ws-error error)
@@ -342,50 +336,55 @@
 
 ;; --- gui ---
 
-(defn editor [cell-id]
-  (r/create-class
-   {:render
-    (fn [] [:textarea])
+(defn editor []
+  (let [!codemirror (atom nil)]
+    (r/create-class
+     {:render
+      (fn [] [:textarea])
 
-    :component-did-mount
-    (fn [this]
-      (let [value (:code (recall-or-recompute (CellMap. cell-id)))
-            codemirror (.fromTextArea
-                        js/CodeMirror
-                        (dom/dom-node this)
-                        #js {:mode "clojure"
-                             :lineNumbers false
-                             :extraKeys #js {"Ctrl-Enter" #(update-cell cell-id)
-                                             "Shift-Enter" #(insert-cell-after cell-id)
-                                             "Shift-Alt-Enter" #(insert-cell-before cell-id)
-                                             "Ctrl-Backspace" #(remove-cell cell-id)}
-                             :matchBrackets true
-                             :autofocus (= cell-id (@state :last-inserted))
-                             :viewportMargin js/Infinity})]
-        (.on codemirror "changes" (fn [_]
-                                    (swap! state assoc-in [:code-now cell-id] (.getValue codemirror))))
-        (.on codemirror "blur" (fn [_]
-                                 (when (not= ((@state :code-now) cell-id) ((@state :code-at-focus) cell-id))
-                                   (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))
-                                   (update-cell cell-id))))
-        (.on codemirror "focus" (fn [_]
-                                  (swap! state assoc-in [:code-at-focus cell-id] (.getValue codemirror))))
-        (swap! state assoc-in [:cell-id->codemirror cell-id] codemirror)
-        (swap! state assoc-in [:code-at-focus cell-id] value)
-        (swap! state assoc-in [:code-now cell-id] value)
-        (.setValue codemirror value)))
+      :component-did-mount
+      (fn [this]
+        (let [value (:code (recall-or-recompute (CellMap. (@state :focused-cell-id))))
+              codemirror (.fromTextArea
+                          js/CodeMirror
+                          (dom/dom-node this)
+                          #js {:mode "clojure"
+                               :lineNumbers false
+                               :extraKeys #js {"Ctrl-Enter" (fn [codemirror]
+                                                              (set-cell-code (@state :focused-cell-id) (.getValue codemirror)))
+                                               "Shift-Enter" #(insert-cell-after (@state :focused-cell-id))
+                                               "Shift-Alt-Enter" #(insert-cell-before (@state :focused-cell-id))
+                                               "Ctrl-Backspace" #(remove-cell (@state :focused-cell-id))}
+                               :matchBrackets true
+                               :autofocus true
+                               :viewportMargin js/Infinity})]
+          (.setValue codemirror value)
+          (.on codemirror "blur" (fn [codemirror]
+                                   (set-cell-code (@state :focused-cell-id) (.getValue codemirror))))
+          (add-watch
+           state
+           codemirror
+           (fn [_ _ old-state new-state]
+             (let [old-cell-id (old-state :focused-cell-id)
+                   new-cell-id (new-state :focused-cell-id)
+                   ;; can't recompute here because it causes infinite recursion, so use stale value for now
+                   new-code (or (get-in new-state [:id->value (CellMap. new-cell-id) :code]) "")]
+               (if (= old-cell-id new-cell-id)
+                ;; code for this cell may have been changed
+                ;; TODO would be nice to avoid blowing away the cursor position
+                 (.setValue codemirror new-code)
+                ;; we changed focused cell
+                 (do
+                   (set-cell-code old-cell-id (.getValue codemirror))
+                   (.setValue codemirror new-code)
+                   (.focus codemirror))))))
+          (reset! !codemirror codemirror)))
 
-    :component-will-unmount
-    (fn [this]
-      (let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
-        (swap! state update-in [:cell-id->codemirror] dissoc cell-id)
-        (.toTextArea codemirror)))}))
-
-(defn update-codemirrors []
-  (doseq [[cell-id code-mirror] (@state :cell-id->codemirror)
-          :let [cell-code (:code (recall-or-recompute (CellMap. cell-id)))]]
-    (when (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id))
-      (.setValue code-mirror cell-code))))
+      :component-will-unmount
+      (fn [this]
+        (let [codemirror @!codemirror]
+          (remove-watch state codemirror)
+          (.toTextArea codemirror)))})))
 
 (defn fn-name [f]
   (cond
@@ -410,84 +409,105 @@
     :else
     (throw (str "Not a function: " (pr-str f)))))
 
-(defn edn [value]
-  (cond
-    (contains? (meta value) :hide)
-    (let [hidden (r/atom true)]
-      (fn [value]
-        (let [value (with-meta value (dissoc (meta value) :hide))]
-          [:div
-           [:button
-            {:on-click #(swap! hidden not)}
-            (if @hidden "+" "-")]
-           (when-not @hidden
-             (edn value))])))
+(declare edn)
 
-    (fn? value)
-    ;; TODO reagent can't tell when a function changes, so this doesn't update nicely
-    (let [arg-ixes (range (fn-num-args value))
-          args (into [] (for [_ arg-ixes] (r/atom "")))
-          output (r/atom nil)]
-      (fn [value]
-        [:form
-         {:action "function () {}"}
-         (doall (for [[arg-ix arg] (map vector arg-ixes args)]
-                  ^{:key arg-ix}
-                  [:input
-                   {:type "text"
-                    :value @arg
-                    :on-change (fn [event] (reset! arg (-> event .-target .-value)))}]))
+(defn edn-hide [value]
+  (let [hidden (r/atom true)]
+    (fn [value]
+      (let [value (with-meta value (dissoc (meta value) :hide))]
+        [:div
          [:button
-          {:on-click (fn [event]
-                       (reset! output
-                               (try (apply value (for [arg args]
-                                                   (clojure.edn/read-string @arg)))
-                                    (catch :default err (Error. err))))
-                       (.preventDefault event))}
-          (fn-name value)]
-         (when @output
-           [edn @output])]))
+          {:on-click #(swap! hidden not)}
+          (if @hidden "+" "-")]
+         (when-not @hidden
+           [edn value])]))))
 
-    (map? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[k v] value]
-          ^{:key (pr-str k)}
-          [:tr
-           [:td [edn k]]
-           [:td [edn v]]])]])
+;; TODO reagent can't tell when a function changes, so this doesn't update nicely
+(defn edn-fn [value]
+  (let [arg-ixes (range (fn-num-args value))
+        args (into [] (for [_ arg-ixes] (r/atom "")))
+        output (r/atom nil)]
+    (fn [value]
+      [:form
+       {:action "function () {}"}
+       (doall (for [[arg-ix arg] (map vector arg-ixes args)]
+                ^{:key arg-ix}
+                [:input
+                 {:type "text"
+                  :value @arg
+                  :on-change (fn [event] (reset! arg (-> event .-target .-value)))}]))
+       [:button
+        {:on-click (fn [event]
+                     (reset! output
+                             (try (apply value (for [arg args]
+                                                 (clojure.edn/read-string @arg)))
+                                  (catch :default err (Error. err))))
+                     (.preventDefault event))}
+        (fn-name value)]
+       (when @output
+         [edn @output])])))
 
-    (vector? value)
+(defn edn-map [value]
+  (let [value (try (sort value) (catch :default _ value))]
     [:table
      {:style {:border-left "1px solid black"
               :border-right "1px solid black"
-              :border-radius "0"
+              :border-radius "0.5em"
+              :padding "0.5em"}}
+     [:tbody
+      (for [[k v] value]
+        ^{:key (pr-str k)}
+        [:tr
+         [:td [edn k]]
+         [:td [edn v]]])]]))
+
+(defn edn-vector [value]
+  [:table
+   {:style {:border-left "1px solid black"
+            :border-right "1px solid black"
+            :border-radius "0"
+            :padding "0.5em"}}
+   [:tbody
+    (for [[elem i] (map vector value (range))]
+      ^{:key i}
+      [:tr
+       [:td [edn elem]]])]])
+
+(defn edn-set [value]
+  (let [value (try (sort value) (catch :default _ value))]
+    [:table
+     {:style {:border-left "1px solid black"
+              :border-right "1px solid black"
+              :border-radius "0.5em"
               :padding "0.5em"}}
      [:tbody
       (for [[elem i] (map vector value (range))]
         ^{:key i}
         [:tr
-         [:td [edn elem]]])]]
+         [:td [edn elem]]])]]))
+
+(defn edn-default [value]
+  [:code (pr-str value)])
+
+(defn edn [value]
+  (cond
+    (contains? (meta value) :hide)
+    [edn-hide value]
+
+    (fn? value)
+    [edn-fn value]
+
+    (map? value)
+    [edn-map value]
+
+    (vector? value)
+    [edn-vector value]
 
     (set? value)
-    (let [value (try (sort value) (catch :default _ value))]
-      [:table
-       {:style {:border-left "1px solid black"
-                :border-right "1px solid black"
-                :border-radius "0.5em"
-                :padding "0.5em"}}
-       [:tbody
-        (for [[elem i] (map vector value (range))]
-          ^{:key i}
-          [:tr
-           [:td [edn elem]]])]])
+    [edn-set value]
+
     :else
-    [:code (pr-str value)]))
+    [edn-default value]))
 
 (defn output [cell-id]
   [:div
@@ -497,45 +517,22 @@
                    (recall-or-recompute (Value. (:name parse)))))]
      [edn value])])
 
-(defn visibility-button [cell-id text new-visibility]
-  [:div [:button
-         {:on-click #(set-visibility cell-id new-visibility)}
-         text]])
-
 (defn cell-name [cell-id]
-  (let [props {:on-click #(set-visibility cell-id :code-and-output)}]
+  (let [props {:on-click #(swap! state assoc :focused-cell-id cell-id)}]
     [:div
      (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
        [:span props name]
        [:span (merge props {:style {:color "grey"}}) "no name"])]))
 
-(defn editor-and-output [cell-id]
-  (let [visibility (or (:visibility (recall-or-recompute (CellMap. cell-id))) :code-and-output)]
-    (conj
-     (case visibility
-       :none
-       [:div
-        [visibility-button cell-id "+" :output]
-        [cell-name cell-id]]
-
-       :output
-       [:div
-        [visibility-button cell-id "-" :none]
-        [cell-name cell-id]
-        [:div {:style {:padding "0.5em"}}
-         [output cell-id]]]
-
-       :code-and-output
-       [:div
-        [visibility-button cell-id "-" :none]
-        [visibility-button cell-id "-" :output]
-        [:div
-         {:style {:border (if (= ((@state :code-at-focus) cell-id) ((@state :code-now) cell-id)) "1px solid #eee" "1px solid #bbb")
-                  :padding "0.5em"}}
-         [editor cell-id]]
-        [:div {:style {:padding "0.5em"}}
-         [output cell-id]]])
-     [:div {:style {:padding "1em"}}])))
+(defn editor-and-output []
+  (if-let [cell-id (@state :focused-cell-id)]
+    [:div
+     [:div
+      {:style {:padding "0.5em"}}
+      [editor cell-id]]
+     [:div {:style {:padding "0.5em"}}
+      [output cell-id]]]
+    [:div]))
 
 (defn debug []
   [:div
@@ -553,7 +550,8 @@
 (defn app []
   [:div
    [:div (for [cell-id (recall-or-recompute (CellIds.))]
-           ^{:key cell-id} [editor-and-output cell-id])]
+           ^{:key cell-id} [cell-name cell-id])]
+   [editor-and-output]
    [:button
 
     {:on-click (fn []
