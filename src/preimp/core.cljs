@@ -367,17 +367,14 @@
            (fn [_ _ old-state new-state]
              (let [old-cell-id (old-state :focused-cell-id)
                    new-cell-id (new-state :focused-cell-id)
+                   old-code (or (get-in old-state [:id->value (CellMap. old-cell-id) :code]) "")
                    ;; can't recompute here because it causes infinite recursion, so use stale value for now
                    new-code (or (get-in new-state [:id->value (CellMap. new-cell-id) :code]) "")]
-               (if (= old-cell-id new-cell-id)
-                ;; code for this cell may have been changed
-                ;; TODO would be nice to avoid blowing away the cursor position
-                 (.setValue codemirror new-code)
-                ;; we changed focused cell
-                 (do
-                   (set-cell-code old-cell-id (.getValue codemirror))
-                   (.setValue codemirror new-code)
-                   (.focus codemirror))))))
+               (when (not= old-cell-id new-cell-id)
+                 (set-cell-code old-cell-id (.getValue codemirror))
+                 (.focus codemirror))
+               (when (and (not= old-code new-code) (not= new-code (.getValue codemirror)))
+                 (.setValue codemirror new-code)))))
           (reset! !codemirror codemirror)))
 
       :component-will-unmount
