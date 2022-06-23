@@ -46,14 +46,17 @@
     ;; version increments on every change made from the outside
     :version 0
 
-    ;; the last version at which this id was computed
-    :id->version {(Ops.) 0}
-
     ;; the value when this id was last computed
     ;; (may be an Error)
     :id->value {(Ops.) #{}}
 
-    ;; other id/value pairs that were used to compute this id
+    ;; the version at which the currently cached value of this id was computed
+    :id->last-changed-at-version {(Ops.) 0}
+
+    ;; the version at which we last checked if the cached value of this id need to be recomputed
+    :id->last-checked-at-version {(Ops.) 0}
+
+    ;; the ids that were used during the last compute of this id
     :id->deps {}
 
     :show-debug-panel? false
@@ -96,42 +99,45 @@
 (declare recall-or-recompute)
 
 (defn deps-changed? [id]
-  (some
-   (fn [[dep dep-value]]
-     (not= (recall-or-recompute dep) dep-value))
-   (get-in @state [:id->deps id])))
+     (let [last-checked (get-in @state [:id->last-checked-at-version id])]
+       (some
+        (fn [dep-id]
+          (recall-or-recompute dep-id)
+          (> (get-in @state [:id->last-changed-at-version dep-id]) last-checked))
+        (get-in @state [:id->deps id]))))
 
 (defn stale? [id]
   (or
    (not (contains? (@state :id->value) id))
-   (and (not= (get-in @state [:id->version id]) (:version @state))
+   (and (not= (get-in @state [:id->last-checked-at-version id]) (:version @state))
         (deps-changed? id))))
 
 (defn recompute [id]
-  ;(d :recompute id)
+  #_(d :recompute id)
   (let [old-value (get-in @state [:id->value id])
-        new-deps (atom {})
+        new-deps (atom #{})
         new-value (try
                     (compute* id (fn [id]
                                    (let [value (recall-or-recompute id)]
-                                     (swap! new-deps assoc id value)
+                                     (swap! new-deps conj id)
                                      (if (instance? Error value)
                                        (throw (:error value))
                                        value))))
                     (catch :default error
                       (Error. error)))]
-    (swap! state assoc-in [:id->version id] (:version @state))
+    (swap! state assoc-in [:id->last-checked-at-version id] (:version @state))
     (when (not= old-value new-value)
+      (swap! state assoc-in [:id->last-changed-at-version id] (:version @state))
       (swap! state assoc-in [:id->value id] new-value))
     (swap! state assoc-in [:id->deps id] @new-deps)
     new-value))
 
 (defn recall-or-recompute [id]
-  (if (stale? id)
-    (recompute id)
-    (do
-      (swap! state assoc-in [:id->version id] (:version @state))
-      (get-in @state [:id->value id]))))
+  (let [value (if (stale? id)
+                (recompute id)
+                (get-in @state [:id->value id]))]
+    (swap! state assoc-in [:id->last-checked-at-version id] (:version @state))
+    value))
 
 ;; --- incremental nodes ---
 
@@ -159,7 +165,6 @@
           reader (cljs.tools.reader.reader-types/indexing-push-back-reader code)
           defs (atom [])]
       (loop []
-
          ;; reset gensym ids so repeated reads are always identical
         (reset! cljs.tools.reader.impl.utils/last-id 0)
         (let [form (binding [cljs.tools.reader/*data-readers*
@@ -251,9 +256,11 @@
 (declare send-ops)
 
 (defn change-input [id value]
-  (swap! state update-in [:version] inc)
-  (swap! state assoc-in [:id->version id] (:version @state))
-  (swap! state assoc-in [:id->value id] value))
+  (when (not= value (get-in @state [:id->value id]))
+    (swap! state update-in [:version] inc)
+    (swap! state assoc-in [:id->last-checked-at-version id] (:version @state))
+    (swap! state assoc-in [:id->last-changed-at-version id] (:version @state))
+    (swap! state assoc-in [:id->value id] value)))
 
 (defn insert-ops [ops]
   (let [old-ops (recall-or-recompute (Ops.))
@@ -535,7 +542,7 @@
    (doall (for [[id value] (sort-by #(pr-str (first %)) (@state :id->value))]
             (let [color (if (instance? Error value) "red" "black")]
               ^{:key (pr-str id)} [:div
-                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->version id]))]
+                                   [:span {:style {:color "blue"}} "v" (pr-str (get-in @state [:id->last-changed-at-version id]))]
                                    " "
                                    [:span {:style {:font-weight "bold"}} (pr-str id)]
                                    " "
