@@ -6,7 +6,7 @@ rm -rf ./out
 
 swaymsg workspace 0
 alacritty --working-directory ./ -e nix-shell --run 'clj -M --main cljs.main --watch src --compile preimp.core' &
-alacritty --working-directory ./ -e nix-shell --run 'clj -e '\''(do (require '\''\'\'''\''preimp.server :reload-all) (preimp.server/-main))'\'' -r' &
+alacritty --working-directory ./ -e nix-shell --run 'clj -X preimp.server/-main' &
 
 sleep 1 # :(
 
