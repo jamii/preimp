@@ -292,10 +292,11 @@
 ;; --- network ---
 
 (defn send-ops [ops]
-  (d :sending (count ops))
-  (try
-    (.send (@state :websocket) (pr-str {:client (@state :client-id) :ops ops}))
-    (catch :default error (d :ws-send-error error))))
+  (when (@state :online-mode?)
+    (d :sending (count ops))
+    (try
+      (.send (@state :websocket) (pr-str {:client (@state :client-id) :ops ops}))
+      (catch :default error (d :ws-send-error error)))))
 
 (defn connect []
   (when (@state :online-mode?)
