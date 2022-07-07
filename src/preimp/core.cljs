@@ -59,8 +59,6 @@
      ;; the ids that were used during the last compute of this id
      :id->deps {}}))
 
-(add-watch state ::test (fn [_ _ _ new-state] (assert new-state)))
-
 ;; --- compiler stuff ---
 
 (def eval-state (cljs.js/empty-state))
