@@ -3,7 +3,8 @@ Prototyping interactions for [imp](https://github.com/jamii/imp) without getting
 Build (dev):
 
 ``` bash
-clj -M --main cljs.main --watch src --compile preimp.standalone
+rm -rf out # :'(
+clj -M --main cljs.main --watch src --output-to out/standalone.js --compile preimp.standalone
 ```
 
 Serve (dev):
@@ -16,7 +17,8 @@ Serve (dev):
 Build (prod):
 
 ``` bash
-clj -M --main cljs.main --optimizations simple --compile preimp.standalone
+rm -rf out # :'(
+clj -M --main cljs.main --optimizations simple --output-to out/standalone.js --compile preimp.standalone 
 clj -T:build build/uber
 ```
 

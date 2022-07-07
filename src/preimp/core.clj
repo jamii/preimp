@@ -89,7 +89,7 @@
 
 ;; --- handlers ---
 
-(def page
+(def standalone-page
   (html5
     [:head
      [:meta {:charset "utf-8"}]
@@ -99,7 +99,20 @@
      [:div#app "loading..."]
      (include-css "cljsjs/codemirror/development/codemirror.css")
      [:style ".CodeMirror {height: auto;}"]
-     (include-js "main.js")]))
+     (include-js "standalone.js")]))
+
+(def embedded-page
+  (html5
+    [:head
+     [:meta {:charset "utf-8"}]
+     [:meta {:name "viewport"
+             :content "width=device-width, initial-scale=1"}]]
+    [:body
+     [:pre.language-preimp "(def x 1)"]
+     [:pre.language-preimp "(def y (inc x))"]
+     (include-css "cljsjs/codemirror/development/codemirror.css")
+     [:style ".CodeMirror {height: auto;}"]
+     (include-js "embedded.js")]))
 
 (def websocket-handler
   {:on-connect (fn [ws])
@@ -128,9 +141,16 @@
       {:status 200})
 
     :else
-    {:status 200
-     :headers {"Content-Type" "text/html"}
-     :body page}))
+    (case (:uri request)
+      "/"
+      {:status 200
+       :headers {"Content-Type" "text/html"}
+       :body standalone-page}
+
+      "/embedded"
+      {:status 200
+       :headers {"Content-Type" "text/html"}
+       :body embedded-page})))
 
 (def app-inner
   (-> handler

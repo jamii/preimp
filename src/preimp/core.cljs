@@ -362,7 +362,7 @@
                                                  "Shift-Alt-Enter" #(insert-cell-before cell-id)
                                                  "Ctrl-Backspace" #(remove-cell cell-id)}
                                  :matchBrackets true
-                                 :autofocus true
+                                 ; :autofocus true
                                  :viewportMargin js/Infinity})]
            (.setValue codemirror value)
            (.on codemirror "blur" (fn [codemirror]
@@ -387,11 +387,18 @@
 (defn fn-name [f]
   (cond
     (instance? cljs.core.MetaFn f)
-    (or (:name (meta f))
+    (or (:preimp/named (meta f))
       (fn-name (.-afn f)))
 
     (fn? f)
-    (last (clojure.string/split (.-name f) "$"))
+    (-> (.-name f)
+      (clojure.string/split "$")
+      last
+      (clojure.string/replace #"^_" "")
+      (clojure.string/replace "_GT_" ">")
+      (clojure.string/replace "_LT_" "<")
+      (clojure.string/replace "_BANG_" "!")
+      (clojure.string/replace "_" "-"))
 
     :else
     (throw (str "Not a function: " (pr-str f)))))
@@ -412,7 +419,7 @@
 (defn edn-hide [value]
   (let [hidden (r/atom true)]
     (fn [value]
-      (let [value (with-meta value (dissoc (meta value) :hide))]
+      (let [value (with-meta value (dissoc (meta value) :preimp/hidden))]
         [:div
          [:button
           {:on-click #(swap! hidden not)}
@@ -443,7 +450,7 @@
                      (.preventDefault event))}
         (fn-name value)]
        (when @output
-         [edn @output])])))
+         [:div [edn @output]])])))
 
 (defn edn-map [value]
   (let [value (try (sort value) (catch :default _ value))]
@@ -489,7 +496,7 @@
 
 (defn edn [value]
   (cond
-    (contains? (meta value) :hide)
+    (contains? (meta value) :preimp/hidden)
     [edn-hide value]
 
     (fn? value)
@@ -544,6 +551,12 @@
                                    [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
 
 ;; --- fns exposed to cells ---
+
+(defn hidden [v]
+  (with-meta v {:preimp/hidden true}))
+
+(defn named [name v]
+  (with-meta v {:preimp/named name}))
 
 (defn edit! [name f & args]
   (let [def (recall-or-recompute (Def. name))]
