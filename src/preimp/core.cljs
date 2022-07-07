@@ -23,11 +23,11 @@
 (defrecord Ops [])
 (defrecord Error [error])
 
-(def client (atom (random-uuid)))
-
 (def state
   (r/atom
     {;; --- network state ----
+
+     :client-id (random-uuid)
 
      :websocket nil
 
@@ -268,13 +268,13 @@
 
 (defn set-cell-code [cell-id code]
   (when (not= code (:code (recall-or-recompute (CellMap. cell-id))))
-    (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :code code)})))
+    (insert-ops #{(preimp.state/->AssocOp nil (@state :client-id) cell-id :code code)})))
 
 (defn insert-cell-after [prev-cell-id]
   (let [new-cell-id (random-uuid)]
     (swap! state assoc :focused-cell-id new-cell-id)
-    (insert-ops #{(preimp.state/->InsertOp nil @client new-cell-id prev-cell-id)
-                 (preimp.state/->AssocOp nil @client new-cell-id :code "")})))
+    (insert-ops #{(preimp.state/->InsertOp nil (@state :client-id) new-cell-id prev-cell-id)
+                 (preimp.state/->AssocOp nil (@state :client-id) new-cell-id :code "")})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -286,7 +286,7 @@
   (let [cell-ids (recall-or-recompute (CellIds.))
         ix (.indexOf cell-ids cell-id)
         prev-cell-id (if (= ix 0) nil (get cell-ids (dec ix)))]
-    (insert-ops #{(preimp.state/->DeleteOp nil @client cell-id)})
+    (insert-ops #{(preimp.state/->DeleteOp nil (@state :client-id) cell-id)})
     (swap! state assoc :focused-cell-id prev-cell-id)))
 
 ;; --- network ---
@@ -294,7 +294,7 @@
 (defn send-ops [ops]
   (d :sending (count ops))
   (try
-    (.send (@state :websocket) (pr-str {:client @client :ops ops}))
+    (.send (@state :websocket) (pr-str {:client (@state :client-id) :ops ops}))
     (catch :default error (d :ws-send-error error))))
 
 (defn connect []
@@ -307,8 +307,8 @@
     (set! (.-onopen (@state :websocket))
       (fn [_]
         (swap! state assoc :connect-retry-timeout 100)
-        ;; switch client so that sever-side tracking of what has been sent resets and we get a fresh start
-        (reset! client (random-uuid))
+        ;; switch client-id so that sever-side tracking of what has been sent resets and we get a fresh start
+        (swap! state assoc :client-id (random-uuid))
         (send-ops (recall-or-recompute (Ops.)))))
     (set! (.-onmessage (@state :websocket))
       (fn [event]
@@ -582,7 +582,7 @@
             new-code (pr-str `(~'defs ~name ~new-value))]
         (when-let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
           (.setValue codemirror new-code))
-        (insert-ops #{(preimp.state/->AssocOp nil @client cell-id :code new-code)})
+        (insert-ops #{(preimp.state/->AssocOp nil (@state :client-id) cell-id :code new-code)})
         nil))))
 
 ;; --- init ---
