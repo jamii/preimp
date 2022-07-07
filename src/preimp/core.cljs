@@ -584,11 +584,3 @@
           (.setValue codemirror new-code))
         (insert-ops #{(preimp.state/->AssocOp nil (@state :client-id) cell-id :code new-code)})
         nil))))
-
-;; --- init ---
-
-(defn init! []
-  (connect)
-  (mount-root))
-
-(init!)
