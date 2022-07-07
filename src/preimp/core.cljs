@@ -335,43 +335,44 @@
 
 ;; --- gui ---
 
-(defn editor []
+(defn editor [cell-id]
   (let [!codemirror (atom nil)]
     (r/create-class
       {:render
        (fn [] [:textarea])
 
+       :component-did-update
+       (fn [this]
+         (let [cell-id (get (.-argv (.-props this)) 1)
+               new-code (or (get-in @state [:id->value (CellMap. cell-id) :code]) "")]
+           (.setValue @!codemirror new-code)))
+
        :component-did-mount
        (fn [this]
-         (let [value (:code (recall-or-recompute (CellMap. (@state :focused-cell-id))))
+         (let [value (:code (recall-or-recompute (CellMap. cell-id)))
                codemirror (.fromTextArea
                             js/CodeMirror
                             (dom/dom-node this)
                             #js {:mode "clojure"
                                  :lineNumbers false
                                  :extraKeys #js {"Ctrl-Enter" (fn [codemirror]
-                                                                (set-cell-code (@state :focused-cell-id) (.getValue codemirror)))
-                                                 "Shift-Enter" #(insert-cell-after (@state :focused-cell-id))
-                                                 "Shift-Alt-Enter" #(insert-cell-before (@state :focused-cell-id))
-                                                 "Ctrl-Backspace" #(remove-cell (@state :focused-cell-id))}
+                                                                (set-cell-code cell-id (.getValue codemirror)))
+                                                 "Shift-Enter" #(insert-cell-after cell-id)
+                                                 "Shift-Alt-Enter" #(insert-cell-before cell-id)
+                                                 "Ctrl-Backspace" #(remove-cell cell-id)}
                                  :matchBrackets true
                                  :autofocus true
                                  :viewportMargin js/Infinity})]
            (.setValue codemirror value)
            (.on codemirror "blur" (fn [codemirror]
-                                    (set-cell-code (@state :focused-cell-id) (.getValue codemirror))))
+                                    (set-cell-code cell-id (.getValue codemirror))))
            (add-watch
              state
              codemirror
              (fn [_ _ old-state new-state]
-               (let [old-cell-id (old-state :focused-cell-id)
-                     new-cell-id (new-state :focused-cell-id)
-                     old-code (or (get-in old-state [:id->value (CellMap. old-cell-id) :code]) "")
+               (let [old-code (or (get-in old-state [:id->value (CellMap. cell-id) :code]) "")
                      ;; can't recompute here because it causes infinite recursion, so use stale value for now
-                     new-code (or (get-in new-state [:id->value (CellMap. new-cell-id) :code]) "")]
-                 (when (not= old-cell-id new-cell-id)
-                   (set-cell-code old-cell-id (.getValue codemirror))
-                   (.focus codemirror))
+                     new-code (or (get-in new-state [:id->value (CellMap. cell-id) :code]) "")]
                  (when (and (not= old-code new-code) (not= new-code (.getValue codemirror)))
                    (.setValue codemirror new-code)))))
            (reset! !codemirror codemirror)))
@@ -520,15 +521,13 @@
        [:span props name]
        [:span (merge props {:style {:color "grey"}}) "no name"])]))
 
-(defn editor-and-output []
-  (if-let [cell-id (@state :focused-cell-id)]
-    [:div
-     [:div
-      {:style {:padding "0.5em"}}
-      [editor cell-id]]
-     [:div {:style {:padding "0.5em"}}
-      [output cell-id]]]
-    [:div]))
+(defn editor-and-output [cell-id]
+  [:div
+   [:div
+    {:style {:padding "0.5em"}}
+    [editor cell-id]]
+   [:div {:style {:padding "0.5em"}}
+    [output cell-id]]])
 
 (defn debug []
   [:div
@@ -542,33 +541,6 @@
                                    [:span {:style {:color color}} (pr-str value)]
                                    " "
                                    [:span {:style {:color "grey"}} (pr-str (sort-by pr-str (keys (get-in @state [:id->deps id]))))]])))])
-
-(defn app []
-  [:div
-   [:div (for [cell-id (recall-or-recompute (CellIds.))]
-           ^{:key cell-id} [cell-name cell-id])]
-   [editor-and-output]
-   [:button
-
-    {:on-click (fn []
-                 (swap! state update-in [:online-mode?] not)
-                 (if (@state :online-mode?)
-                   (connect)
-                   (disconnect)))}
-    (if (@state :online-mode?)
-      "go offline"
-      "go online")]
-   [:button
-    {:on-click #(insert-cell-after nil)}
-    "add cell"]
-   [:button
-    {:on-click #(swap! state update-in [:show-debug-panel?] not)}
-    (if (@state :show-debug-panel?) "close debug panel" "show debug panel")]
-   (when (@state :show-debug-panel?)
-     [debug])])
-
-(defn mount-root []
-  (dom/render [app] (.getElementById js/document "app")))
 
 ;; --- fns exposed to cells ---
 
