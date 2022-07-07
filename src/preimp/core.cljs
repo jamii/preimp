@@ -1,19 +1,20 @@
 (ns preimp.core
-  (:require-macros [preimp.core :refer [analyzer-state]])
+  (:require-macros
+    [preimp.core :refer [analyzer-state]])
   (:require
-   cljsjs.codemirror
-   cljsjs.codemirror.mode.clojure
-   cljsjs.codemirror.addon.edit.matchbrackets
-   cljsjs.codemirror.addon.comment.comment
-   [reagent.dom :as dom]
-   [reagent.core :as r]
-   cljs.js
-   preimp.state
-   clojure.edn
-   clojure.set
-   cljs.tools.reader
-   cljs.tools.reader.impl.utils
-   clojure.string))
+    cljsjs.codemirror
+    cljsjs.codemirror.mode.clojure
+    cljsjs.codemirror.addon.edit.matchbrackets
+    cljsjs.codemirror.addon.comment.comment
+    [reagent.dom :as dom]
+    [reagent.core :as r]
+    cljs.js
+    preimp.state
+    clojure.edn
+    clojure.set
+    cljs.tools.reader
+    cljs.tools.reader.impl.utils
+    clojure.string))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -26,37 +27,37 @@
 
 (def state
   (r/atom
-   {;; --- network state ----
+    {;; --- network state ----
 
-    :websocket nil
+     :websocket nil
 
-    :connect-retry-timeout 100
+     :connect-retry-timeout 100
 
-    ;; --- gui state ---
+     ;; --- gui state ---
 
-    :focused-cell-id nil
+     :focused-cell-id nil
 
-    :show-debug-panel? false
+     :show-debug-panel? false
 
-    :online-mode? true
+     :online-mode? true
 
-    ;; --- incremental eval state ---
+     ;; --- incremental eval state ---
 
-    ;; version increments on every change made from the outside
-    :version 0
+     ;; version increments on every change made from the outside
+     :version 0
 
-    ;; the value when this id was last computed
-    ;; (may be an Error)
-    :id->value {(Ops.) #{}}
+     ;; the value when this id was last computed
+     ;; (may be an Error)
+     :id->value {(Ops.) #{}}
 
-    ;; the version at which the currently cached value of this id was computed
-    :id->last-changed-at-version {(Ops.) 0}
+     ;; the version at which the currently cached value of this id was computed
+     :id->last-changed-at-version {(Ops.) 0}
 
-    ;; the version at which we last checked if the cached value of this id need to be recomputed
-    :id->last-checked-at-version {(Ops.) 0}
+     ;; the version at which we last checked if the cached value of this id need to be recomputed
+     :id->last-checked-at-version {(Ops.) 0}
 
-    ;; the ids that were used during the last compute of this id
-    :id->deps {}}))
+     ;; the ids that were used during the last compute of this id
+     :id->deps {}}))
 
 (add-watch state ::test (fn [_ _ _ new-state] (assert new-state)))
 
@@ -98,16 +99,16 @@
 (defn deps-changed? [id]
   (let [last-checked (get-in @state [:id->last-checked-at-version id])]
     (some
-     (fn [dep-id]
-       (recall-or-recompute dep-id)
-       (> (get-in @state [:id->last-changed-at-version dep-id]) last-checked))
-     (get-in @state [:id->deps id]))))
+      (fn [dep-id]
+        (recall-or-recompute dep-id)
+        (> (get-in @state [:id->last-changed-at-version dep-id]) last-checked))
+      (get-in @state [:id->deps id]))))
 
 (defn stale? [id]
   (or
-   (not (contains? (@state :id->value) id))
-   (and (not= (get-in @state [:id->last-checked-at-version id]) (:version @state))
-        (deps-changed? id))))
+    (not (contains? (@state :id->value) id))
+    (and (not= (get-in @state [:id->last-checked-at-version id]) (:version @state))
+      (deps-changed? id))))
 
 (defn recompute [id]
   #_(d :recompute id)
@@ -152,8 +153,8 @@
   Incremental
   (compute* [this compute]
     (or
-     (get-in (compute (State.)) [:cell-maps id])
-     "")))
+      (get-in (compute (State.)) [:cell-maps id])
+      "")))
 
 (defrecord CellParse [id]
   Incremental
@@ -162,7 +163,7 @@
           reader (cljs.tools.reader.reader-types/indexing-push-back-reader code)
           defs (atom [])]
       (loop []
-         ;; reset gensym ids so repeated reads are always identical
+        ;; reset gensym ids so repeated reads are always identical
         (reset! cljs.tools.reader.impl.utils/last-id 0)
         (let [form (binding [cljs.tools.reader/*data-readers*
                              {'inst (fn [date] (new js/Date date))}]
@@ -191,12 +192,12 @@
   (compute* [this compute]
     (let [cell-ids (compute (CellIds.))]
       (into #{}
-            (for [cell-id cell-ids
-                  :let [cell-parse (try
-                                     (compute (CellParse. cell-id))
-                                     (catch :default error nil))]
-                  :when cell-parse]
-              (:name cell-parse))))))
+        (for [cell-id cell-ids
+              :let [cell-parse (try
+                                 (compute (CellParse. cell-id))
+                                 (catch :default error nil))]
+              :when cell-parse]
+          (:name cell-parse))))))
 
 (defrecord Def [name]
   Incremental
@@ -204,7 +205,7 @@
     (let [cell-ids (compute (CellIds.))
           cell-parses (for [cell-id cell-ids]
                         (try (compute (CellParse. cell-id))
-                             (catch :default error nil)))
+                          (catch :default error nil)))
           matching-defs (filter #(= name (:name %)) cell-parses)]
       (case (count matching-defs)
         0 (throw [:no-def-for-name name])
@@ -219,7 +220,7 @@
           refers (atom #{})]
       (names-into! (:form def) refers)
       (into #{}
-            (filter #(and (not= name %) (names %)) @refers)))))
+        (filter #(and (not= name %) (names %)) @refers)))))
 
 (defrecord Thunk [name]
   Incremental
@@ -275,7 +276,7 @@
   (let [new-cell-id (random-uuid)]
     (swap! state assoc :focused-cell-id new-cell-id)
     (insert-ops #{(preimp.state/->InsertOp nil @client new-cell-id prev-cell-id)
-                  (preimp.state/->AssocOp nil @client new-cell-id :code "")})))
+                 (preimp.state/->AssocOp nil @client new-cell-id :code "")})))
 
 (defn insert-cell-before [next-cell-id]
   (let [cell-ids (recall-or-recompute (CellIds.))
@@ -306,28 +307,28 @@
           ws-address (str ws-protocol "//" js/location.host "/")]
       (swap! state assoc :websocket (new js/WebSocket. ws-address)))
     (set! (.-onopen (@state :websocket))
-          (fn [_]
-            (swap! state assoc :connect-retry-timeout 100)
-            ;; switch client so that sever-side tracking of what has been sent resets and we get a fresh start
-            (reset! client (random-uuid))
-            (send-ops (recall-or-recompute (Ops.)))))
+      (fn [_]
+        (swap! state assoc :connect-retry-timeout 100)
+        ;; switch client so that sever-side tracking of what has been sent resets and we get a fresh start
+        (reset! client (random-uuid))
+        (send-ops (recall-or-recompute (Ops.)))))
     (set! (.-onmessage (@state :websocket))
-          (fn [event]
-            (let [old-ops (recall-or-recompute (Ops.))
-                  server-ops (clojure.edn/read-string
-                              {:readers preimp.state/readers}
-                              (.-data event))
-                  _ (d :receiving (count server-ops))
-                  new-ops (preimp.state/compact-ops (clojure.set/union old-ops server-ops))]
-              (when (not= old-ops new-ops)
-                (change-input (Ops.) new-ops)))))
+      (fn [event]
+        (let [old-ops (recall-or-recompute (Ops.))
+              server-ops (clojure.edn/read-string
+                           {:readers preimp.state/readers}
+                           (.-data event))
+              _ (d :receiving (count server-ops))
+              new-ops (preimp.state/compact-ops (clojure.set/union old-ops server-ops))]
+          (when (not= old-ops new-ops)
+            (change-input (Ops.) new-ops)))))
     (set! (.-onerror (@state :websocket))
-          (fn [error]
-            (d :ws-error error)
-            (.close (@state :websocket))))
+      (fn [error]
+        (d :ws-error error)
+        (.close (@state :websocket))))
     (set! (.-onclose (@state :websocket))
-          (fn []
-            (js/setTimeout connect (@state :connect-retry-timeout))))))
+      (fn []
+        (js/setTimeout connect (@state :connect-retry-timeout))))))
 
 (defn disconnect []
   (d :disconnecting)
@@ -339,55 +340,55 @@
 (defn editor []
   (let [!codemirror (atom nil)]
     (r/create-class
-     {:render
-      (fn [] [:textarea])
+      {:render
+       (fn [] [:textarea])
 
-      :component-did-mount
-      (fn [this]
-        (let [value (:code (recall-or-recompute (CellMap. (@state :focused-cell-id))))
-              codemirror (.fromTextArea
-                          js/CodeMirror
-                          (dom/dom-node this)
-                          #js {:mode "clojure"
-                               :lineNumbers false
-                               :extraKeys #js {"Ctrl-Enter" (fn [codemirror]
-                                                              (set-cell-code (@state :focused-cell-id) (.getValue codemirror)))
-                                               "Shift-Enter" #(insert-cell-after (@state :focused-cell-id))
-                                               "Shift-Alt-Enter" #(insert-cell-before (@state :focused-cell-id))
-                                               "Ctrl-Backspace" #(remove-cell (@state :focused-cell-id))}
-                               :matchBrackets true
-                               :autofocus true
-                               :viewportMargin js/Infinity})]
-          (.setValue codemirror value)
-          (.on codemirror "blur" (fn [codemirror]
-                                   (set-cell-code (@state :focused-cell-id) (.getValue codemirror))))
-          (add-watch
-           state
-           codemirror
-           (fn [_ _ old-state new-state]
-             (let [old-cell-id (old-state :focused-cell-id)
-                   new-cell-id (new-state :focused-cell-id)
-                   old-code (or (get-in old-state [:id->value (CellMap. old-cell-id) :code]) "")
-                   ;; can't recompute here because it causes infinite recursion, so use stale value for now
-                   new-code (or (get-in new-state [:id->value (CellMap. new-cell-id) :code]) "")]
-               (when (not= old-cell-id new-cell-id)
-                 (set-cell-code old-cell-id (.getValue codemirror))
-                 (.focus codemirror))
-               (when (and (not= old-code new-code) (not= new-code (.getValue codemirror)))
-                 (.setValue codemirror new-code)))))
-          (reset! !codemirror codemirror)))
+       :component-did-mount
+       (fn [this]
+         (let [value (:code (recall-or-recompute (CellMap. (@state :focused-cell-id))))
+               codemirror (.fromTextArea
+                            js/CodeMirror
+                            (dom/dom-node this)
+                            #js {:mode "clojure"
+                                 :lineNumbers false
+                                 :extraKeys #js {"Ctrl-Enter" (fn [codemirror]
+                                                                (set-cell-code (@state :focused-cell-id) (.getValue codemirror)))
+                                                 "Shift-Enter" #(insert-cell-after (@state :focused-cell-id))
+                                                 "Shift-Alt-Enter" #(insert-cell-before (@state :focused-cell-id))
+                                                 "Ctrl-Backspace" #(remove-cell (@state :focused-cell-id))}
+                                 :matchBrackets true
+                                 :autofocus true
+                                 :viewportMargin js/Infinity})]
+           (.setValue codemirror value)
+           (.on codemirror "blur" (fn [codemirror]
+                                    (set-cell-code (@state :focused-cell-id) (.getValue codemirror))))
+           (add-watch
+             state
+             codemirror
+             (fn [_ _ old-state new-state]
+               (let [old-cell-id (old-state :focused-cell-id)
+                     new-cell-id (new-state :focused-cell-id)
+                     old-code (or (get-in old-state [:id->value (CellMap. old-cell-id) :code]) "")
+                     ;; can't recompute here because it causes infinite recursion, so use stale value for now
+                     new-code (or (get-in new-state [:id->value (CellMap. new-cell-id) :code]) "")]
+                 (when (not= old-cell-id new-cell-id)
+                   (set-cell-code old-cell-id (.getValue codemirror))
+                   (.focus codemirror))
+                 (when (and (not= old-code new-code) (not= new-code (.getValue codemirror)))
+                   (.setValue codemirror new-code)))))
+           (reset! !codemirror codemirror)))
 
-      :component-will-unmount
-      (fn [this]
-        (let [codemirror @!codemirror]
-          (remove-watch state codemirror)
-          (.toTextArea codemirror)))})))
+       :component-will-unmount
+       (fn [this]
+         (let [codemirror @!codemirror]
+           (remove-watch state codemirror)
+           (.toTextArea codemirror)))})))
 
 (defn fn-name [f]
   (cond
     (instance? cljs.core.MetaFn f)
     (or (:name (meta f))
-        (fn-name (.-afn f)))
+      (fn-name (.-afn f)))
 
     (fn? f)
     (last (clojure.string/split (.-name f) "$"))
@@ -436,9 +437,9 @@
        [:button
         {:on-click (fn [event]
                      (reset! output
-                             (try (apply value (for [arg args]
-                                                 (clojure.edn/read-string @arg)))
-                                  (catch :default err (Error. err))))
+                       (try (apply value (for [arg args]
+                                           (clojure.edn/read-string @arg)))
+                         (catch :default err (Error. err))))
                      (.preventDefault event))}
         (fn-name value)]
        (when @output

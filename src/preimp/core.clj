@@ -1,21 +1,21 @@
 (ns preimp.core
   (:require
-   [ring.adapter.jetty9 :as jetty]
-   [cljs.env]
-   [hiccup.page :refer [include-js include-css html5]]
-   [ring.middleware.file :refer [wrap-file]]
-   [ring.middleware.resource :refer [wrap-resource]]
-   preimp.state
-   [next.jdbc :as jdbc]
-   [clojure.data.json :as json]))
+    [ring.adapter.jetty9 :as jetty]
+    [cljs.env]
+    [hiccup.page :refer [include-js include-css html5]]
+    [ring.middleware.file :refer [wrap-file]]
+    [ring.middleware.resource :refer [wrap-resource]]
+    preimp.state
+    [next.jdbc :as jdbc]
+    [clojure.data.json :as json]))
 
 ;; --- state ---
 
 (def state
   (atom
-   {:ops #{}
-    :client->websocket {}
-    :client->ops {}}))
+    {:ops #{}
+     :client->websocket {}
+     :client->ops {}}))
 
 ;; --- actions ---
 
@@ -23,8 +23,8 @@
 
 (defn init-db []
   (jdbc/execute!
-   db
-   ["create table if not exists op (edn text)"]))
+    db
+    ["create table if not exists op (edn text)"]))
 
 (defn write-ops [ops]
   (doseq [op ops]
@@ -63,11 +63,11 @@
 (defn recv-ops-from-put [input-stream]
   (let [msg (json/read-str (slurp input-stream))
         op (preimp.state/->AssocOp
-            (preimp.state/next-version (@state :ops))
-            (java.util.UUID/randomUUID)
-            (java.util.UUID/fromString (get msg "cell-id"))
-            :code
-            (get msg "value"))]
+             (preimp.state/next-version (@state :ops))
+             (java.util.UUID/randomUUID)
+             (java.util.UUID/fromString (get msg "cell-id"))
+             :code
+             (get msg "value"))]
     (recv-ops #{op})))
 
 ;; --- change polling ---
@@ -91,15 +91,15 @@
 
 (def page
   (html5
-   [:head
-    [:meta {:charset "utf-8"}]
-    [:meta {:name "viewport"
-            :content "width=device-width, initial-scale=1"}]]
-   [:body
-    [:div#app "loading..."]
-    (include-css "cljsjs/codemirror/development/codemirror.css")
-    [:style ".CodeMirror {height: auto;}"]
-    (include-js "main.js")]))
+    [:head
+     [:meta {:charset "utf-8"}]
+     [:meta {:name "viewport"
+             :content "width=device-width, initial-scale=1"}]]
+    [:body
+     [:div#app "loading..."]
+     (include-css "cljsjs/codemirror/development/codemirror.css")
+     [:style ".CodeMirror {height: auto;}"]
+     (include-js "main.js")]))
 
 (def websocket-handler
   {:on-connect (fn [ws])
@@ -107,7 +107,7 @@
                (prn [:ws-error e])
                (jetty/close! ws))
    :on-close (fn [ws status-code reason]
-           ;; TODO remove client from client->websocket
+               ;; TODO remove client from client->websocket
                (prn [:ws-close status-code reason]))
    :on-text (fn [ws text]
               (read-ops-if-changed)
@@ -134,7 +134,7 @@
 
 (def app-inner
   (-> handler
-      (wrap-resource "")))
+    (wrap-resource "")))
 
 (defn app [request]
   ;; this is a hack to make cljs debug builds work with wrap-resource

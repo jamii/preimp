@@ -13,12 +13,6 @@ Serve (dev):
 (preimp.server/-main)
 ```
 
-Format:
-
-``` bash
-clj -Sdeps '{:deps {cljfmt {:mvn/version "0.8.0"}}}' -m cljfmt.main fix
-```
-
 Build (prod):
 
 ``` bash
