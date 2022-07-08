@@ -339,7 +339,6 @@
 (defn editor [init-cell-id]
   (let [!codemirror (atom nil)
         !cell-id (atom init-cell-id)]
-    (d :init-cell-id init-cell-id)
     (r/create-class
       {:render
        (fn []
@@ -349,8 +348,6 @@
        (fn [this old-argv new-argv]
          (let [cell-id (get new-argv 1)]
            (reset! !cell-id cell-id)
-           (d :new-cell-id cell-id)
-           (d old-argv new-argv)
            (not= old-argv new-argv)))
 
        :component-did-update
