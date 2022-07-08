@@ -14,7 +14,8 @@
     clojure.set
     cljs.tools.reader
     cljs.tools.reader.impl.utils
-    clojure.string))
+    clojure.string
+    [fipp.edn :as fipp]))
 
 (defn d [& args] (js/console.log (pr-str args)) (last args))
 
@@ -585,7 +586,7 @@
       (let [cell-id (:cell-id def)
             old-value (recall-or-recompute (Value. name))
             new-value (apply f old-value args)
-            new-code (pr-str `(~'defs ~name ~new-value))]
+            new-code (with-out-str (fipp/pprint `(~'defs ~name ~new-value) {}))]
         (when-let [codemirror (get-in @state [:cell-id->codemirror cell-id])]
           (.setValue codemirror new-code))
         (insert-ops #{(preimp.state/->AssocOp nil (@state :client-id) cell-id :code new-code)})
