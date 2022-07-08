@@ -537,11 +537,19 @@
      [edn value])])
 
 (defn cell-name [cell-id]
-  (let [props {:on-click #(swap! state assoc :focused-cell-id cell-id)}]
-    [:div
-     (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
-       [:span props name]
-       [:span (merge props {:style {:color "grey"}}) "no name"])]))
+  [:div
+   {:style {:margin "0.25em"
+            :background-color (if (= cell-id (@state :focused-cell-id))
+                                "LightCyan"
+                                "inherit")}}
+   (if-let [name (:name (recall-or-recompute (CellParse. cell-id)))]
+     [:span
+      {:on-click #(swap! state assoc :focused-cell-id cell-id)}
+      name]
+     [:span
+      {:on-click #(swap! state assoc :focused-cell-id cell-id)
+       :style {:color "grey"}}
+      "no name"])])
 
 (defn editor-and-output [cell-id]
   [:div
@@ -549,7 +557,8 @@
     {:style {:padding "0.5em"}}
     [editor cell-id]]
    [:div {:style {:padding "0.5em"}}
-    [output cell-id]]])
+    [:div {:style {:padding "4px"}} ; to line up with codemirror text
+     [output cell-id]]]])
 
 (defn debug []
   [:div
