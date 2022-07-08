@@ -336,44 +336,58 @@
 
 ;; --- gui ---
 
-(defn editor [cell-id]
-  (let [!codemirror (atom nil)]
+(defn editor [init-cell-id]
+  (let [!codemirror (atom nil)
+        !cell-id (atom init-cell-id)]
+    (d :init-cell-id init-cell-id)
     (r/create-class
       {:render
-       (fn [] [:textarea])
+       (fn []
+         [:textarea])
+
+       :should-component-update
+       (fn [this old-argv new-argv]
+         (let [cell-id (get new-argv 1)]
+           (reset! !cell-id cell-id)
+           (d :new-cell-id cell-id)
+           (d old-argv new-argv)
+           (not= old-argv new-argv)))
 
        :component-did-update
        (fn [this]
-         (let [cell-id (get (.-argv (.-props this)) 1)
-               new-code (or (get-in @state [:id->value (CellMap. cell-id) :code]) "")]
+         (let [new-code (or (get-in @state [:id->value (CellMap. @!cell-id) :code]) "")]
            (.setValue @!codemirror new-code)))
 
        :component-did-mount
        (fn [this]
-         (let [value (:code (recall-or-recompute (CellMap. cell-id)))
+         (let [value (:code (recall-or-recompute (CellMap. @!cell-id)))
                codemirror (.fromTextArea
                             js/CodeMirror
                             (dom/dom-node this)
                             #js {:mode "clojure"
                                  :lineNumbers false
                                  :extraKeys #js {"Ctrl-Enter" (fn [codemirror]
-                                                                (set-cell-code cell-id (.getValue codemirror)))
-                                                 "Shift-Enter" #(insert-cell-after cell-id)
-                                                 "Shift-Alt-Enter" #(insert-cell-before cell-id)
-                                                 "Ctrl-Backspace" #(remove-cell cell-id)}
+                                                                (set-cell-code @!cell-id (.getValue codemirror)))
+                                                 "Shift-Enter" (fn [codemirror]
+                                                                  (set-cell-code @!cell-id (.getValue codemirror))
+                                                                  (insert-cell-after @!cell-id))
+                                                 "Shift-Alt-Enter" (fn [codemirror]
+                                                                      (set-cell-code @!cell-id (.getValue codemirror))
+                                                                      (insert-cell-before @!cell-id))
+                                                 "Ctrl-Backspace" #(remove-cell @!cell-id)}
                                  :matchBrackets true
                                  ; :autofocus true
                                  :viewportMargin js/Infinity})]
            (.setValue codemirror value)
            (.on codemirror "blur" (fn [codemirror]
-                                    (set-cell-code cell-id (.getValue codemirror))))
+                                    (set-cell-code @!cell-id (.getValue codemirror))))
            (add-watch
              state
              codemirror
              (fn [_ _ old-state new-state]
-               (let [old-code (or (get-in old-state [:id->value (CellMap. cell-id) :code]) "")
+               (let [old-code (or (get-in old-state [:id->value (CellMap. @!cell-id) :code]) "")
                      ;; can't recompute here because it causes infinite recursion, so use stale value for now
-                     new-code (or (get-in new-state [:id->value (CellMap. cell-id) :code]) "")]
+                     new-code (or (get-in new-state [:id->value (CellMap. @!cell-id) :code]) "")]
                  (when (and (not= old-code new-code) (not= new-code (.getValue codemirror)))
                    (.setValue codemirror new-code)))))
            (reset! !codemirror codemirror)))
