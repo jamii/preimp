@@ -290,6 +290,22 @@
     (insert-ops #{(preimp.state/->DeleteOp nil (@state :client-id) cell-id)})
     (swap! state assoc :focused-cell-id prev-cell-id)))
 
+(defn ->script []
+  (let [cell-ids (recall-or-recompute (CellIds.))
+        codes (for [cell-id cell-ids]
+                (let [cell-parse (recall-or-recompute (CellParse. cell-id))]
+                  (with-out-str
+                    (fipp/pprint
+                      `(~(case (:kind cell-parse)
+                           defs 'def
+                           def 'def
+                           defn 'defn)
+                         ~(:name cell-parse)
+                         ~@(:body cell-parse))))))
+        ns (with-out-str (fipp/pprint '(ns preimp.exported (:require clojure.string))))
+        compat (with-out-str (fipp/pprint '(defn edit! [& args]) {}))]
+    (clojure.string/join "\n\n" (apply list ns compat codes))))
+
 ;; --- network ---
 
 (defn send-ops [ops]
@@ -557,6 +573,17 @@
    [:div {:style {:padding "0.5em"}}
     [:div {:style {:padding "4px"}} ; to line up with codemirror text
      [output cell-id]]]])
+
+(defn export []
+  (let [blob (js/Blob. [(->script)] {"type" "text/plain"})
+        a (js/document.createElement "a")]
+    (set! (.-download a) "exported.cljs")
+    (set! (.-href a) (.createObjectURL js/URL blob))
+    (js/document.body.appendChild a)
+    (js/window.requestAnimationFrame
+      (fn []
+        (.dispatchEvent a (js/MouseEvent. "click"))
+        (js/document.body.removeChild a)))))
 
 (defn debug []
   [:div

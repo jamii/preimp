@@ -32,7 +32,11 @@
      [:div
       [:button
        {:on-click #(swap! core/state update-in [:show-debug-panel?] not)}
-       (if (@core/state :show-debug-panel?) "close debug panel" "show debug panel")]]]
+       (if (@core/state :show-debug-panel?) "close debug panel" "show debug panel")]]
+     [:div
+      [:button
+       {:on-click core/export}
+       "export"]]]
     [:div
      {:style {:padding "1em"
               :border-right "1px solid black"}}]
