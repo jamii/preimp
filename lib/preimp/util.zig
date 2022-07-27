@@ -1,0 +1,352 @@
+const std = @import("std");
+
+pub const Allocator = std.mem.Allocator;
+pub const ArenaAllocator = std.heap.ArenaAllocator;
+pub const ArrayList = std.ArrayList;
+pub const HashMap = std.HashMap;
+
+// TODO should probably preallocate memory for panic message
+pub fn panic(comptime fmt: []const u8, args: anytype) noreturn {
+    var buf = ArrayList(u8).init(std.heap.c_allocator);
+    var writer = buf.writer();
+    const message: []const u8 = message: {
+        std.fmt.format(writer, fmt, args) catch |err| {
+            switch (err) {
+                error.OutOfMemory => break :message "OOM inside panic",
+            }
+        };
+        break :message buf.toOwnedSlice();
+    };
+    @panic(message);
+}
+
+pub fn oom() noreturn {
+    @panic("Out of memory");
+}
+
+pub fn dump(thing: anytype) void {
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
+    const my_stderr = std.io.getStdErr();
+    const writer = my_stderr.writer();
+    dumpInto(writer, 0, thing) catch return;
+    writer.writeAll("\n") catch return;
+}
+
+pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
+    switch (@typeInfo(@TypeOf(thing))) {
+        .Pointer => |pti| {
+            switch (pti.size) {
+                .One => {
+                    try writer.writeAll("&");
+                    try dumpInto(writer, indent, thing.*);
+                },
+                .Many => {
+                    // bail
+                    try std.fmt.format(writer, "{}", .{thing});
+                },
+                .Slice => {
+                    if (pti.child == u8) {
+                        try std.fmt.format(writer, "\"{s}\"", .{thing});
+                    } else {
+                        try std.fmt.format(writer, "[]{s}[\n", .{pti.child});
+                        for (thing) |elem| {
+                            try writer.writeByteNTimes(' ', indent + 4);
+                            try dumpInto(writer, indent + 4, elem);
+                            try writer.writeAll(",\n");
+                        }
+                        try writer.writeByteNTimes(' ', indent);
+                        try writer.writeAll("]");
+                    }
+                },
+                .C => {
+                    // bail
+                    try std.fmt.format(writer, "{}", .{thing});
+                },
+            }
+        },
+        .Array => |ati| {
+            if (ati.child == u8) {
+                try std.fmt.format(writer, "\"{s}\"", .{thing});
+            } else {
+                try std.fmt.format(writer, "[{}]{s}[\n", .{ ati.len, ati.child });
+                for (thing) |elem| {
+                    try writer.writeByteNTimes(' ', indent + 4);
+                    try dumpInto(writer, indent + 4, elem);
+                    try writer.writeAll(",\n");
+                }
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("]");
+            }
+        },
+        .Struct => |sti| {
+            try writer.writeAll(@typeName(@TypeOf(thing)));
+            try writer.writeAll("{\n");
+            inline for (sti.fields) |field| {
+                try writer.writeByteNTimes(' ', indent + 4);
+                try std.fmt.format(writer, ".{s} = ", .{field.name});
+                try dumpInto(writer, indent + 4, @field(thing, field.name));
+                try writer.writeAll(",\n");
+            }
+            try writer.writeByteNTimes(' ', indent);
+            try writer.writeAll("}");
+        },
+        .Union => |uti| {
+            if (uti.tag_type) |tag_type| {
+                try writer.writeAll(@typeName(@TypeOf(thing)));
+                try writer.writeAll("{\n");
+                inline for (@typeInfo(tag_type).Enum.fields) |fti| {
+                    if (@enumToInt(std.meta.activeTag(thing)) == fti.value) {
+                        try writer.writeByteNTimes(' ', indent + 4);
+                        try std.fmt.format(writer, ".{s} = ", .{fti.name});
+                        try dumpInto(writer, indent + 4, @field(thing, fti.name));
+                        try writer.writeAll("\n");
+                        try writer.writeByteNTimes(' ', indent);
+                        try writer.writeAll("}");
+                    }
+                }
+            } else {
+                // bail
+                try std.fmt.format(writer, "{}", .{thing});
+            }
+        },
+        .Optional => {
+            if (thing == null) {
+                try writer.writeAll("null");
+            } else {
+                try dumpInto(writer, indent, thing.?);
+            }
+        },
+        .Opaque => {
+            try writer.writeAll("opaque");
+        },
+        else => {
+            // bail
+            try std.fmt.format(writer, "{any}", .{thing});
+        },
+    }
+}
+
+pub fn format(allocator: Allocator, comptime fmt: []const u8, args: anytype) []const u8 {
+    var buf = ArrayList(u8).init(allocator);
+    var writer = buf.writer();
+    std.fmt.format(writer, fmt, args) catch oom();
+    return buf.items;
+}
+
+pub fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
+    return deepCompare(a, b) == .eq;
+}
+
+pub fn deepCompare(a: anytype, b: @TypeOf(a)) std.math.Order {
+    const T = @TypeOf(a);
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct, .Enum, .Union => {
+            if (@hasDecl(T, "deepCompare")) {
+                return T.deepCompare(a, b);
+            }
+        },
+        else => {},
+    }
+    switch (ti) {
+        .Bool => {
+            if (a == b) return .eq;
+            if (a) return .gt;
+            return .lt;
+        },
+        .Int, .Float => {
+            if (a < b) {
+                return .lt;
+            }
+            if (a > b) {
+                return .gt;
+            }
+            return .eq;
+        },
+        .Enum => {
+            return deepCompare(@enumToInt(a), @enumToInt(b));
+        },
+        .Pointer => |pti| {
+            switch (pti.size) {
+                .One => {
+                    return deepCompare(a.*, b.*);
+                },
+                .Slice => {
+                    if (a.len < b.len) {
+                        return .lt;
+                    }
+                    if (a.len > b.len) {
+                        return .gt;
+                    }
+                    for (a) |a_elem, a_ix| {
+                        const ordering = deepCompare(a_elem, b[a_ix]);
+                        if (ordering != .eq) {
+                            return ordering;
+                        }
+                    }
+                    return .eq;
+                },
+                .Many, .C => @compileError("cannot deepCompare " ++ @typeName(T)),
+            }
+        },
+        .Optional => {
+            if (a) |a_val| {
+                if (b) |b_val| {
+                    return deepCompare(a_val, b_val);
+                } else {
+                    return .gt;
+                }
+            } else {
+                if (b) |_| {
+                    return .lt;
+                } else {
+                    return .eq;
+                }
+            }
+        },
+        .Array => {
+            for (a) |a_elem, a_ix| {
+                const ordering = deepCompare(a_elem, b[a_ix]);
+                if (ordering != .eq) {
+                    return ordering;
+                }
+            }
+            return .eq;
+        },
+        .Struct => |sti| {
+            inline for (sti.fields) |fti| {
+                const ordering = deepCompare(@field(a, fti.name), @field(b, fti.name));
+                if (ordering != .eq) {
+                    return ordering;
+                }
+            }
+            return .eq;
+        },
+        .Union => |uti| {
+            if (uti.tag_type) |tag_type| {
+                const enum_info = @typeInfo(tag_type).Enum;
+                const a_tag = @enumToInt(@as(tag_type, a));
+                const b_tag = @enumToInt(@as(tag_type, b));
+                if (a_tag < b_tag) {
+                    return .lt;
+                }
+                if (a_tag > b_tag) {
+                    return .gt;
+                }
+                inline for (enum_info.fields) |fti| {
+                    if (a_tag == fti.value) {
+                        return deepCompare(
+                            @field(a, fti.name),
+                            @field(b, fti.name),
+                        );
+                    }
+                }
+                unreachable;
+            } else {
+                @compileError("cannot deepCompare " ++ @typeName(T));
+            }
+        },
+        .Void => return .eq,
+        .ErrorUnion => {
+            if (a) |a_ok| {
+                if (b) |b_ok| {
+                    return deepCompare(a_ok, b_ok);
+                } else |_| {
+                    return .lt;
+                }
+            } else |a_err| {
+                if (b) |_| {
+                    return .gt;
+                } else |b_err| {
+                    return deepCompare(a_err, b_err);
+                }
+            }
+        },
+        .ErrorSet => return deepCompare(@errorToInt(a), @errorToInt(b)),
+        else => @compileError("cannot deepCompare " ++ @typeName(T)),
+    }
+}
+
+pub fn deepHash(key: anytype) u64 {
+    var hasher = std.hash.Wyhash.init(0);
+    deepHashInto(&hasher, key);
+    return hasher.final();
+}
+
+pub fn deepHashInto(hasher: anytype, key: anytype) void {
+    const T = @TypeOf(key);
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct, .Enum, .Union => {
+            if (@hasDecl(T, "deepHashInto")) {
+                return T.deepHashInto(hasher, key);
+            }
+        },
+        else => {},
+    }
+    switch (ti) {
+        .Int => @call(.{ .modifier = .always_inline }, hasher.update, .{std.mem.asBytes(&key)}),
+        .Float => |info| deepHashInto(hasher, @bitCast(std.Int(.unsigned, info.bits), key)),
+        .Bool => deepHashInto(hasher, @boolToInt(key)),
+        .Enum => deepHashInto(hasher, @enumToInt(key)),
+        .Pointer => |pti| {
+            switch (pti.size) {
+                .One => deepHashInto(hasher, key.*),
+                .Slice => {
+                    for (key) |element| {
+                        deepHashInto(hasher, element);
+                    }
+                },
+                .Many, .C => @compileError("cannot deepHash " ++ @typeName(T)),
+            }
+        },
+        .Optional => if (key) |k| deepHashInto(hasher, k),
+        .Array => {
+            for (key) |element| {
+                deepHashInto(hasher, element);
+            }
+        },
+        .Struct => |info| {
+            inline for (info.fields) |field| {
+                deepHashInto(hasher, @field(key, field.name));
+            }
+        },
+        .Union => |info| {
+            if (info.tag_type) |tag_type| {
+                const enum_info = @typeInfo(tag_type).Enum;
+                const tag = std.meta.activeTag(key);
+                deepHashInto(hasher, tag);
+                inline for (enum_info.fields) |enum_field| {
+                    if (enum_field.value == @enumToInt(tag)) {
+                        deepHashInto(hasher, @field(key, enum_field.name));
+                        return;
+                    }
+                }
+                unreachable;
+            } else @compileError("cannot deepHash " ++ @typeName(T));
+        },
+        .Void => {},
+        else => @compileError("cannot deepHash " ++ @typeName(T)),
+    }
+}
+
+pub fn DeepHashContext(comptime K: type) type {
+    return struct {
+        const Self = @This();
+        pub fn hash(_: Self, pseudo_key: K) u64 {
+            return deepHash(pseudo_key);
+        }
+        pub fn eql(_: Self, pseudo_key: K, key: K) bool {
+            return deepEqual(pseudo_key, key);
+        }
+    };
+}
+
+pub fn DeepHashMap(comptime K: type, comptime V: type) type {
+    return std.HashMap(K, V, DeepHashContext(K), std.hash_map.default_max_load_percentage);
+}
+
+pub fn DeepHashSet(comptime K: type) type {
+    return DeepHashMap(K, void);
+}

@@ -4,3 +4,4 @@ target
 .cpcache
 preimp.db
 secret.nix
+./zig-cache
