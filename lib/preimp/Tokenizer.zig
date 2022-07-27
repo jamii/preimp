@@ -1,8 +1,8 @@
 const std = @import("std");
 const preimp = @import("../preimp.zig");
+const u = preimp.util;
 
 const Tokenizer = @This();
-
 source: [:0]const u8,
 pos: usize,
 
@@ -222,7 +222,6 @@ test "numbers" {
 
     try testTokenize("-1a", &.{.err});
     try testTokenize("32N", &.{.err});
-    try testTokenize("-32r123Zz", &.{.err});
     try testTokenize("1/2", &.{.err});
     try testTokenize("-1/2", &.{.err});
 }
