@@ -136,7 +136,7 @@ pub fn parseExprs(self: *Parser, closing_token: preimp.Tokenizer.Token) error{Ou
     return expr_ixes.toOwnedSlice();
 }
 
-pub fn dumpInto(self: *Parser, writer: anytype, indent: u32, expr_ixes: []const ExprIx) anyerror!void {
+pub fn dumpInto(self: Parser, writer: anytype, indent: u32, expr_ixes: []const ExprIx) anyerror!void {
     for (expr_ixes) |expr_ix| {
         const expr = self.exprs.items[expr_ix];
         switch (expr) {

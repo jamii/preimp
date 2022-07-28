@@ -287,7 +287,7 @@ pub fn deepHashInto(hasher: anytype, key: anytype) void {
     }
     switch (ti) {
         .Int => @call(.{ .modifier = .always_inline }, hasher.update, .{std.mem.asBytes(&key)}),
-        .Float => |info| deepHashInto(hasher, @bitCast(std.Int(.unsigned, info.bits), key)),
+        .Float => |info| deepHashInto(hasher, @bitCast(std.meta.Int(.unsigned, info.bits), key)),
         .Bool => deepHashInto(hasher, @boolToInt(key)),
         .Enum => deepHashInto(hasher, @enumToInt(key)),
         .Pointer => |pti| {
@@ -349,4 +349,19 @@ pub fn DeepHashMap(comptime K: type, comptime V: type) type {
 
 pub fn DeepHashSet(comptime K: type) type {
     return DeepHashMap(K, void);
+}
+
+pub fn deepSort(slice: anytype) void {
+    const T = @typeInfo(@TypeOf(slice)).Pointer.child;
+    std.sort.sort(T, slice, {}, struct {
+        fn lessThan(_: void, a: T, b: T) bool {
+            return deepCompare(a, b) == .lt;
+        }
+    }.lessThan);
+}
+
+pub fn box(allocator: Allocator, value: anytype) error{OutOfMemory}!*@TypeOf(value) {
+    var boxed = try allocator.create(@TypeOf(value));
+    boxed.* = value;
+    return boxed;
 }
