@@ -1,0 +1,66 @@
+nil
+---
+nil
+
+[1 "a" {2 "b"}]
+---
+[
+    1.0e+00
+    "a"
+    {
+        2.0e+00
+        "b"
+    }
+]
+
+(def a 1)
+a
+---
+1.0e+00
+
+(def both (fn [a b] [a b]))
+(both "a" "b")
+---
+[
+    "a"
+    "b"
+]
+
+(def both (fn [a b] [a b]))
+(def a "c")
+(both "a" b)
+---
+[
+    "a"
+    err
+]
+
+(def neither (fn [a b]))
+(def both (fn [a b] [a b]))
+(def a "c")
+(def ??? (if true both neither))
+(??? "a" "b")
+---
+[
+    "a"
+    "b"
+]
+
+(def neither (fn [a b]))
+(def both (fn [a b] [a b]))
+(def a "c")
+(def ??? (if false both neither))
+(??? "a" "b")
+---
+nil
+
+(def foo (fn [a]
+  (def b a)
+  b))
+(def b "b")
+[(foo "a") b]
+---
+[
+    "a"
+    "b"
+]
