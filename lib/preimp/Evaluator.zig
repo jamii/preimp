@@ -122,6 +122,7 @@ pub const KeyVal = struct {
 
 pub const Builtin = enum {
     get,
+    put,
 };
 
 pub const Fun = struct {
@@ -150,10 +151,7 @@ pub const Error = union(enum) {
         expected: usize,
         found: usize,
     },
-    wrong_type: struct {
-        expected: ValueTag,
-        found: ValueTag,
-    },
+    not_a_map: *Value,
     not_found,
 };
 
@@ -273,16 +271,41 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                             const key = tail.items[1];
 
                             if (map != .map)
-                                return Value{ .err = .{ .wrong_type = .{ .expected = .map, .found = map } } };
+                                return Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
 
                             return switch (u.binarySearch(KeyVal, key, map.map, {}, (struct {
-                                fn compare(_: void, key_: Value, entry: KeyVal) std.math.Order {
-                                    return u.deepCompare(key_, entry.key);
+                                fn compare(_: void, key_: Value, key_val: KeyVal) std.math.Order {
+                                    return u.deepCompare(key_, key_val.key);
                                 }
                             }).compare)) {
                                 .Found => |pos| map.map[pos].val,
                                 .NotFound => Value{ .err = .not_found },
                             };
+                        },
+                        .put => {
+                            if (tail.items.len != 3)
+                                return Value{ .err = .{ .wrong_number_of_args = .{ .expected = 3, .found = tail.items.len } } };
+
+                            const map = tail.items[0];
+                            const key = tail.items[1];
+                            const val = tail.items[2];
+
+                            if (map != .map)
+                                return Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
+
+                            var key_vals = try u.ArrayList(KeyVal).initCapacity(self.allocator, map.map.len);
+                            try key_vals.appendSlice(map.map);
+
+                            switch (u.binarySearch(KeyVal, key, key_vals.items, {}, (struct {
+                                fn compare(_: void, key_: Value, key_val: KeyVal) std.math.Order {
+                                    return u.deepCompare(key_, key_val.key);
+                                }
+                            }).compare)) {
+                                .Found => |pos| key_vals.items[pos].val = val,
+                                .NotFound => |pos| try key_vals.insert(pos, .{ .key = key, .val = val }),
+                            }
+
+                            return Value{ .map = key_vals.toOwnedSlice() };
                         },
                     }
                 },
