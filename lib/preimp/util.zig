@@ -365,3 +365,39 @@ pub fn box(allocator: Allocator, value: anytype) error{OutOfMemory}!*@TypeOf(val
     boxed.* = value;
     return boxed;
 }
+
+pub const BinarySearchResult = union(enum) {
+    Found: usize,
+    NotFound: usize,
+
+    pub fn position(self: BinarySearchResult) usize {
+        return switch (self) {
+            .Found => |found| found,
+            .NotFound => |not_found| not_found,
+        };
+    }
+};
+
+pub fn binarySearch(
+    comptime T: type,
+    key: anytype,
+    items: []const T,
+    context: anytype,
+    comptime compareFn: fn (context: @TypeOf(context), lhs: @TypeOf(key), rhs: T) std.math.Order,
+) BinarySearchResult {
+    var left: usize = 0;
+    var right: usize = items.len;
+
+    while (left < right) {
+        // Avoid overflowing in the midpoint calculation
+        const mid = left + (right - left) / 2;
+        // Compare the key with the midpoint element
+        switch (compareFn(context, key, items[mid])) {
+            .eq => return .{ .Found = mid },
+            .gt => left = mid + 1,
+            .lt => right = mid,
+        }
+    }
+
+    return .{ .NotFound = left };
+}

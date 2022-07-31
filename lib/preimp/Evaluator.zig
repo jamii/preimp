@@ -9,7 +9,22 @@ env: u.ArrayList(Binding),
 
 pub const ExprIx = usize;
 
-pub const Value = union(enum) {
+pub const ValueTag = enum {
+    nil,
+    @"true",
+    @"false",
+    symbol,
+    string,
+    number,
+    list,
+    vec,
+    map,
+    builtin,
+    fun,
+    err,
+};
+
+pub const Value = union(ValueTag) {
     nil,
     @"true",
     @"false",
@@ -20,6 +35,7 @@ pub const Value = union(enum) {
     vec: []const Value,
     // sorted by key
     map: []const KeyVal,
+    builtin: Builtin,
     fun: Fun,
     err: Error,
 
@@ -81,9 +97,14 @@ pub const Value = union(enum) {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("}\n");
             },
+            .builtin => |builtin| {
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll(std.meta.tagName(builtin));
+                try writer.writeAll("\n");
+            },
             .fun => |_| {
                 try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("<fun>");
+                try writer.writeAll("<fn>");
                 try writer.writeAll("\n");
             },
             .err => |_| {
@@ -97,6 +118,10 @@ pub const Value = union(enum) {
 pub const KeyVal = struct {
     key: Value,
     val: Value,
+};
+
+pub const Builtin = enum {
+    get,
 };
 
 pub const Fun = struct {
@@ -125,6 +150,11 @@ pub const Error = union(enum) {
         expected: usize,
         found: usize,
     },
+    wrong_type: struct {
+        expected: ValueTag,
+        found: ValueTag,
+    },
+    not_found,
 };
 
 pub fn init(allocator: u.Allocator, exprs: []const preimp.Parser.Expr) Evaluator {
@@ -149,10 +179,15 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
     const expr = self.exprs[expr_ix];
     switch (expr) {
         .symbol => |symbol| {
-            // predefined symbols
+            // builtin values
             if (u.deepEqual(symbol, "nil")) return Value{ .nil = {} };
             if (u.deepEqual(symbol, "true")) return Value{ .@"true" = {} };
             if (u.deepEqual(symbol, "false")) return Value{ .@"false" = {} };
+
+            // builtin functions
+            inline for (@typeInfo(Builtin).Enum.fields) |field|
+                if (u.deepEqual(symbol, field.name))
+                    return Value{ .builtin = @intToEnum(Builtin, field.value) };
 
             // regular symbols
             var i = self.env.items.len;
@@ -228,6 +263,29 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
             for (list[1..]) |tail_expr_ix|
                 try tail.append(try self.evalExpr(tail_expr_ix));
             switch (head) {
+                .builtin => |builtin| {
+                    switch (builtin) {
+                        .get => {
+                            if (tail.items.len != 2)
+                                return Value{ .err = .{ .wrong_number_of_args = .{ .expected = 2, .found = tail.items.len } } };
+
+                            const map = tail.items[0];
+                            const key = tail.items[1];
+
+                            if (map != .map)
+                                return Value{ .err = .{ .wrong_type = .{ .expected = .map, .found = map } } };
+
+                            return switch (u.binarySearch(KeyVal, key, map.map, {}, (struct {
+                                fn compare(_: void, key_: Value, entry: KeyVal) std.math.Order {
+                                    return u.deepCompare(key_, entry.key);
+                                }
+                            }).compare)) {
+                                .Found => |pos| map.map[pos].val,
+                                .NotFound => Value{ .err = .not_found },
+                            };
+                        },
+                    }
+                },
                 .fun => |fun| {
                     // apply
                     const fn_env_start = self.env.items.len;
@@ -261,6 +319,7 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                 try body.append(.{ .key = key, .val = val });
             }
             u.deepSort(body.items);
+            // TODO check no duplicate values
             return Value{ .map = body.toOwnedSlice() };
         },
         .err => |err| {
