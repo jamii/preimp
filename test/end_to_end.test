@@ -32,7 +32,9 @@ a
 ---
 [
     "a"
-    err
+    #
+        "error"
+        Error{ .undef = { 98 } }
 ]
 
 (def neither (fn [a b]))
@@ -94,3 +96,47 @@ nil
 (get (put (put {} "a" 1) "a" 2) "a")
 ---
 2.0e+00
+
+#
+    "foo"
+    "foo"
+---
+#
+    "foo"
+    "foo"
+
+(put {} #"foo" "foo" #"bar" "bar")
+---
+{
+    #
+        "foo"
+        "foo"
+    #
+        "bar"
+        "bar"
+}
+
+(get {})
+---
+#
+    "error"
+    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 2, .found = 1 } }
+
+(get {} "a" "b")
+---
+#
+    "error"
+    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 2, .found = 3 } }
+
+
+(put {} "a")
+---
+#
+    "error"
+    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 3, .found = 2 } }
+
+(put {} "a" "b" "c")
+---
+#
+    "error"
+    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 3, .found = 4 } }

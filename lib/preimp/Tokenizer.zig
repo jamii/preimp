@@ -16,6 +16,7 @@ pub const Token = enum {
     close_vec,
     open_map,
     close_map,
+    start_tag,
     comment,
     whitespace,
     eof,
@@ -59,9 +60,22 @@ pub fn next(self: *Tokenizer) Token {
                 ']' => return .close_vec,
                 '{' => return .open_map,
                 '}' => return .close_map,
+                '#' => return .start_tag,
                 '"' => state = .string,
                 ';' => state = .comment,
-                'a'...'z', 'A'...'Z', '&', '*', '+', '!', '_', '?', '<', '>', '=' => state = .symbol,
+                'a'...'z',
+                'A'...'Z',
+                '&',
+                '*',
+                '+',
+                '!',
+                '_',
+                '?',
+                '<',
+                '>',
+                '=',
+                '/',
+                => state = .symbol,
                 '0'...'9' => state = .number,
                 '-' => state = .minus,
                 ' ', '\r', '\t', '\n' => state = .whitespace,
@@ -119,7 +133,7 @@ pub fn next(self: *Tokenizer) Token {
                 },
             },
             .symbol => switch (char) {
-                'a'...'z', 'A'...'Z', '0'...'9', '&', '*', '+', '!', '_', '?', '<', '>', '=', '-' => {},
+                'a'...'z', 'A'...'Z', '0'...'9', '&', '*', '+', '!', '_', '?', '<', '>', '=', '/', '-' => {},
                 0, ' ', '\r', '\t', '\n', ')', ']', '}' => {
                     self.pos -= 1;
                     return .symbol;
@@ -231,7 +245,7 @@ test "boundaries" {
     try testTokenize("(def a[1])", &.{ .open_list, .symbol, .whitespace, .err, .open_vec, .number, .close_vec, .close_list });
     try testTokenize(
         \\[#-?"foo"]
-    , &.{ .open_vec, .err, .close_vec });
+    , &.{ .open_vec, .start_tag, .err, .close_vec });
 
     try testTokenize(
         \\[""]
@@ -248,5 +262,11 @@ test "real code" {
         \\(.startsWith(:uri request) "/out")
     , &.{ .open_list, .err, .open_list, .err, .whitespace, .symbol, .close_list, .whitespace, .string, .close_list });
 
-    try testTokenize("#/ {}", &.{ .err, .whitespace, .open_map, .close_map });
+    try testTokenize("#/ {}", &.{ .start_tag, .symbol, .whitespace, .open_map, .close_map });
+}
+
+test "tags" {
+    try testTokenize("#foo bar", &.{ .start_tag, .symbol, .whitespace, .symbol });
+    try testTokenize("foo#bar", &.{.err});
+    try testTokenize("#foo[", &.{ .start_tag, .err, .open_vec });
 }

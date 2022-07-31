@@ -21,7 +21,13 @@ pub const Expr = union(enum) {
     list: []const ExprIx,
     vec: []const ExprIx,
     map: []const ExprIx,
+    tagged: Tagged,
     err: Error,
+};
+
+pub const Tagged = struct {
+    key: ExprIx,
+    val: ExprIx,
 };
 
 pub const Error = union(enum) {
@@ -33,6 +39,7 @@ pub const Error = union(enum) {
     invalid_string,
     map_with_odd_elems,
     tokenizer_error,
+    tag_ended_early,
 };
 
 pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
@@ -59,12 +66,6 @@ pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
     };
 }
 
-fn takeToken(self: *Parser) preimp.Tokenizer.Token {
-    const token = self.tokens[self.token_ix];
-    self.token_ix += 1;
-    return token;
-}
-
 fn pushExpr(self: *Parser, expr_ixes: *u.ArrayList(ExprIx), expr: Expr, start: TokenIx) !void {
     const expr_ix = self.exprs.items.len;
     try self.exprs.append(expr);
@@ -72,11 +73,15 @@ fn pushExpr(self: *Parser, expr_ixes: *u.ArrayList(ExprIx), expr: Expr, start: T
     try expr_ixes.append(expr_ix);
 }
 
-pub fn parseExprs(self: *Parser, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]const ExprIx {
+pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]const ExprIx {
     var expr_ixes = u.ArrayList(ExprIx).init(self.allocator);
     while (true) {
+        if (max_exprs_o) |max_exprs|
+            if (expr_ixes.items.len >= max_exprs)
+                break;
         const start = self.token_ix;
-        const token = self.takeToken();
+        const token = self.tokens[start];
+        self.token_ix += 1;
         switch (token) {
             .symbol => {
                 const token_loc = self.token_locs[start];
@@ -103,19 +108,27 @@ pub fn parseExprs(self: *Parser, closing_token: preimp.Tokenizer.Token) error{Ou
                 try self.pushExpr(&expr_ixes, expr, start);
             },
             .open_list => {
-                const list_expr_ixes = try self.parseExprs(.close_list);
+                const list_expr_ixes = try self.parseExprs(null, .close_list);
                 try self.pushExpr(&expr_ixes, .{ .list = list_expr_ixes }, start);
             },
             .open_vec => {
-                const vec_expr_ixes = try self.parseExprs(.close_vec);
+                const vec_expr_ixes = try self.parseExprs(null, .close_vec);
                 try self.pushExpr(&expr_ixes, .{ .vec = vec_expr_ixes }, start);
             },
             .open_map => {
-                const map_expr_ixes = try self.parseExprs(.close_map);
+                const map_expr_ixes = try self.parseExprs(null, .close_map);
                 const expr = if (map_expr_ixes.len % 2 == 0)
                     Expr{ .map = map_expr_ixes }
                 else
                     Expr{ .err = .map_with_odd_elems };
+                try self.pushExpr(&expr_ixes, expr, start);
+            },
+            .start_tag => {
+                const tag_expr_ixes = try self.parseExprs(2, .eof);
+                const expr = if (tag_expr_ixes.len != 2)
+                    Expr{ .err = .tag_ended_early }
+                else
+                    Expr{ .tagged = .{ .key = tag_expr_ixes[0], .val = tag_expr_ixes[1] } };
                 try self.pushExpr(&expr_ixes, expr, start);
             },
             .close_list, .close_vec, .close_map, .eof => {
@@ -123,8 +136,9 @@ pub fn parseExprs(self: *Parser, closing_token: preimp.Tokenizer.Token) error{Ou
                     // pretend we saw closing_token before token
                     const expr = Expr{ .err = .{ .unexpected = .{ .expected = closing_token, .found = token } } };
                     try self.pushExpr(&expr_ixes, expr, start);
-                    self.token_ix -= 1;
                 }
+                if (token != closing_token or token == .eof)
+                    self.token_ix -= 1;
                 break;
             },
             .err => {
@@ -176,6 +190,11 @@ pub fn dumpInto(self: Parser, writer: anytype, indent: u32, expr_ixes: []const E
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("}\n");
             },
+            .tagged => |tagged| {
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("#\n");
+                try self.dumpInto(writer, indent + 4, &.{ tagged.key, tagged.val });
+            },
             .err => |_| {
                 try writer.writeByteNTimes(' ', indent);
                 try std.fmt.format(writer, "err\n", .{});
@@ -188,7 +207,7 @@ fn testParse(source: [:0]const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = try Parser.init(arena.allocator(), source);
-    const expr_ixes = try parser.parseExprs(.eof);
+    const expr_ixes = try parser.parseExprs(null, .eof);
     var found = u.ArrayList(u8).init(arena.allocator());
     try parser.dumpInto(found.writer(), 0, expr_ixes);
     try std.testing.expectEqualStrings(expected, found.items);
@@ -251,6 +270,18 @@ test {
         \\def
         \\a
         \\1.0e+00
+        \\
+    );
+
+    try testParse(
+        \\[#foo bar quux]
+    ,
+        \\[
+        \\    #
+        \\        foo
+        \\        bar
+        \\    quux
+        \\]
         \\
     );
 }

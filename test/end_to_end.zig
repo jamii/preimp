@@ -49,13 +49,13 @@ pub fn main() anyerror!void {
             var case_iter = std.mem.split(u8, case, "---");
             const source = std.mem.trim(u8, case_iter.next().?, "\n ");
             const expected = std.mem.trim(u8, case_iter.next().?, "\n ");
-            try std.testing.expectEqual(case_iter.next(), null);
+            std.debug.assert(case_iter.next() == null);
 
             var arena = u.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
             var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, source));
-            const expr_ixes = try parser.parseExprs(.eof);
+            const expr_ixes = try parser.parseExprs(null, .eof);
             var evaluator = preimp.Evaluator.init(arena.allocator(), parser.exprs.items);
             const value = try evaluator.evalExprs(expr_ixes);
 

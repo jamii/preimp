@@ -19,6 +19,7 @@ pub const ValueTag = enum {
     list,
     vec,
     map,
+    tagged,
     builtin,
     fun,
     err,
@@ -35,6 +36,7 @@ pub const Value = union(ValueTag) {
     vec: []const Value,
     // sorted by key
     map: []const KeyVal,
+    tagged: Tagged,
     builtin: Builtin,
     fun: Fun,
     err: Error,
@@ -97,6 +99,12 @@ pub const Value = union(ValueTag) {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("}\n");
             },
+            .tagged => |tagged| {
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("#\n");
+                try Value.dumpInto(writer, indent + 4, tagged.key.*);
+                try Value.dumpInto(writer, indent + 4, tagged.val.*);
+            },
             .builtin => |builtin| {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll(std.meta.tagName(builtin));
@@ -107,9 +115,13 @@ pub const Value = union(ValueTag) {
                 try writer.writeAll("<fn>");
                 try writer.writeAll("\n");
             },
-            .err => |_| {
+            .err => |err| {
                 try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "err\n", .{});
+                try writer.writeAll("#\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try writer.writeAll("\"error\"\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try std.fmt.format(writer, "{}\n", .{err});
             },
         }
     }
@@ -118,6 +130,11 @@ pub const Value = union(ValueTag) {
 pub const KeyVal = struct {
     key: Value,
     val: Value,
+};
+
+pub const Tagged = struct {
+    key: *Value,
+    val: *Value,
 };
 
 pub const Builtin = enum {
@@ -344,6 +361,14 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
             u.deepSort(body.items);
             // TODO check no duplicate values
             return Value{ .map = body.toOwnedSlice() };
+        },
+        .tagged => |tagged| {
+            const key = try self.evalExpr(tagged.key);
+            const val = try self.evalExpr(tagged.val);
+            return Value{ .tagged = .{
+                .key = try u.box(self.allocator, key),
+                .val = try u.box(self.allocator, val),
+            } };
         },
         .err => |err| {
             return Value{ .err = .{ .parse_error = err } };
