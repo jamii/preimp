@@ -121,11 +121,12 @@ nil
     "error"
     #
         "wrong number of args"
-        (
-            get
-            {
-            }
-        )
+        {
+            "found"
+            2.0e+00
+            "expected"
+            1.0e+00
+        }
 
 (get {} "a" "b")
 ---
@@ -133,13 +134,12 @@ nil
     "error"
     #
         "wrong number of args"
-        (
-            get
-            {
-            }
-            "a"
-            "b"
-        )
+        {
+            "found"
+            2.0e+00
+            "expected"
+            3.0e+00
+        }
 
 (put {} "a")
 ---
@@ -147,12 +147,12 @@ nil
     "error"
     #
         "wrong number of args"
-        (
-            put
-            {
-            }
-            "a"
-        )
+        {
+            "found"
+            3.0e+00
+            "expected"
+            2.0e+00
+        }
 
 (put {} "a" "b" "c")
 ---
@@ -160,14 +160,12 @@ nil
     "error"
     #
         "wrong number of args"
-        (
-            put
-            {
-            }
-            "a"
-            "b"
-            "c"
-        )
+        {
+            "found"
+            3.0e+00
+            "expected"
+            4.0e+00
+        }
 
 [1 3.14 -0.4 -0. {"foo" "ba\"r"}]
 ---

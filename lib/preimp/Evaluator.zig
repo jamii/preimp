@@ -132,8 +132,8 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                         .get => {
                             if (tail.items.len != 2)
                                 return preimp.Value.format(self.allocator,
-                                    \\ #"error" #"wrong number of args" ?
-                                , .{expr});
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
 
                             const map = tail.items[0];
                             const key = tail.items[1];
@@ -157,8 +157,8 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                         .put => {
                             if (tail.items.len != 3)
                                 return preimp.Value.format(self.allocator,
-                                    \\ #"error" #"wrong number of args" ?
-                                , .{expr});
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 3, tail.items.len });
 
                             const map = tail.items[0];
                             const key = tail.items[1];
@@ -192,7 +192,7 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                     try self.env.appendSlice(fun.env);
                     if (fun.args.len != tail.items.len)
                         return preimp.Value.format(self.allocator,
-                            \\ #"error" #"wrong number of args" {"expected args" ? "found args" ?}
+                            \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
                         , .{ fun.args.len, tail.items.len });
                     for (fun.args) |arg, i|
                         try self.env.append(.{ .name = arg, .value = tail.items[i] });

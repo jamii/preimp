@@ -40,8 +40,8 @@ pub const Value = union(ValueTag) {
             else => {},
         }
         switch (@typeInfo(T)) {
-            .Int => return Value{ .number = @intToFloat(f64, zig_value) },
-            .Float => return Value{ .number = @floatCast(f64, zig_value) },
+            .Int, .ComptimeInt => return Value{ .number = @intToFloat(f64, zig_value) },
+            .Float, .ComptimeFloat => return Value{ .number = @floatCast(f64, zig_value) },
             .Struct => |info| {
                 var map_values = u.ArrayList(KeyVal).init(allocator);
                 inline for (info.fields) |field| {
