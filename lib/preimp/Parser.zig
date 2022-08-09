@@ -47,7 +47,7 @@ fn pushValue(self: *Parser, values: *u.ArrayList(preimp.Value), value: preimp.Va
     try values.append(value);
 }
 
-pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]const preimp.Value {
+pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]preimp.Value {
     var values = u.ArrayList(preimp.Value).init(self.allocator);
     while (true) {
         if (max_exprs_o) |max_exprs|
@@ -78,7 +78,9 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 const expr = if (std.zig.string_literal.parseAlloc(self.allocator, bytes)) |string|
                     preimp.Value{ .string = string }
                 else |_|
-                    preimp.Value{ .err = .invalid_string };
+                    try preimp.Value.format(self.allocator,
+                        \\ #"error" #"invalid string" nil
+                    , .{});
                 try self.pushValue(&values, expr, start);
             },
             .number => {
@@ -87,7 +89,9 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 const expr = if (std.fmt.parseFloat(f64, bytes)) |number|
                     preimp.Value{ .number = number }
                 else |_|
-                    preimp.Value{ .err = .invalid_number };
+                    try preimp.Value.format(self.allocator,
+                        \\ #"error" #"invalid number" nil
+                    , .{});
                 try self.pushValue(&values, expr, start);
             },
             .open_list => {
@@ -101,7 +105,13 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .open_map => {
                 const map_exprs = try self.parseExprs(null, .close_map);
                 if (map_exprs.len % 2 == 1) {
-                    try self.pushValue(&values, .{ .err = .map_with_odd_elems }, start);
+                    try self.pushValue(
+                        &values,
+                        try preimp.Value.format(self.allocator,
+                            \\ #"error" #"map with odd elems" nil
+                        , .{}),
+                        start,
+                    );
                 } else {
                     var map_values = try u.ArrayList(preimp.KeyVal).initCapacity(self.allocator, @divTrunc(map_exprs.len, 2));
                     var i: usize = 0;
@@ -118,7 +128,9 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .start_tag => {
                 const tag_values = try self.parseExprs(2, .eof);
                 const expr = if (tag_values.len != 2)
-                    preimp.Value{ .err = .tag_ended_early }
+                    try preimp.Value.format(self.allocator,
+                        \\ #"error" #"tag ended early" nil
+                    , .{})
                 else
                     preimp.Value{ .tagged = .{
                         .key = try self.boxValue(tag_values[0]),
@@ -129,7 +141,10 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .close_list, .close_vec, .close_map, .eof => {
                 if (token != closing_token) {
                     // pretend we saw closing_token before token
-                    const expr = preimp.Value{ .err = .{ .unexpected = .{ .expected = closing_token, .found = token } } };
+                    const expr =
+                        try preimp.Value.format(self.allocator,
+                        \\ #"error" #"unexpected token" {"expected" ? "found" ?}
+                    , .{ closing_token, token });
                     try self.pushValue(&values, expr, start);
                 }
                 if (token != closing_token or token == .eof)
@@ -137,100 +152,16 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 break;
             },
             .err => {
-                try self.pushValue(&values, .{ .err = .tokenizer_error }, start);
+                try self.pushValue(
+                    &values,
+                    try preimp.Value.format(self.allocator,
+                        \\ #"error" #"tokenizer error" nil
+                    , .{}),
+                    start,
+                );
             },
             .comment, .whitespace => continue,
         }
     }
     return values.toOwnedSlice();
-}
-
-fn testParse(source: [:0]const u8, expected: []const u8) !void {
-    var arena = u.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var parser = try Parser.init(arena.allocator(), source);
-    const values = try parser.parseExprs(null, .eof);
-    var found = u.ArrayList(u8).init(arena.allocator());
-    for (values) |value|
-        try preimp.Value.dumpInto(found.writer(), 0, value);
-    try std.testing.expectEqualStrings(expected, found.items);
-}
-
-test {
-    try testParse(
-        \\(= [1 3.14 -0.4 -0.] {"foo" "ba\"r"})
-    ,
-        \\(
-        \\    =
-        \\    [
-        \\        1.0e+00
-        \\        3.14e+00
-        \\        -4.0e-01
-        \\        -0.0e+00
-        \\    ]
-        \\    {
-        \\        "foo"
-        \\        "ba\"r"
-        \\    }
-        \\)
-        \\
-    );
-    try testParse(
-        \\[1 (= 2]
-    ,
-        \\[
-        \\    1.0e+00
-        \\    (
-        \\        =
-        \\        2.0e+00
-        \\        #
-        \\            "error"
-        \\            Error{ .unexpected = lib.preimp.value.struct:151:17{ .expected = Token.close_list, .found = Token.close_vec } }
-        \\    )
-        \\]
-        \\
-    );
-    try testParse(
-        \\["foo""bar"]
-    ,
-        \\[
-        \\    #
-        \\        "error"
-        \\        Error{ .tokenizer_error = void }
-        \\]
-        \\
-    );
-    try testParse(
-        \\(def a 1
-    ,
-        \\(
-        \\    def
-        \\    a
-        \\    1.0e+00
-        \\    #
-        \\        "error"
-        \\        Error{ .unexpected = lib.preimp.value.struct:151:17{ .expected = Token.close_list, .found = Token.eof } }
-        \\)
-        \\
-    );
-    try testParse(
-        \\def a 1
-    ,
-        \\def
-        \\a
-        \\1.0e+00
-        \\
-    );
-
-    try testParse(
-        \\[#foo bar quux]
-    ,
-        \\[
-        \\    #
-        \\        foo
-        \\        bar
-        \\    quux
-        \\]
-        \\
-    );
 }

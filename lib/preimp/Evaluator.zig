@@ -32,7 +32,6 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
         .number,
         .builtin,
         .fun,
-        .err,
         => return expr,
         .symbol => |symbol| {
             // builtin functions
@@ -49,11 +48,15 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
             }
 
             // undefined symbol
-            return preimp.Value{ .err = .{ .undef = symbol } };
+            return preimp.Value.format(self.allocator,
+                \\ #"error" #"undefined" ?
+            , .{symbol});
         },
         .list => |list| {
             if (list.len == 0)
-                return preimp.Value{ .err = .empty_list };
+                return preimp.Value.format(self.allocator,
+                    \\ #"error" #"empty list" nil
+                , .{});
 
             // special forms
             const head_expr = list[0];
@@ -61,10 +64,14 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                 if (u.deepEqual(head_expr.symbol, "def")) {
                     // (def symbol expr)
                     if (list.len != 3)
-                        return preimp.Value{ .err = .bad_def };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"malformed def" ?
+                        , .{expr});
                     const name_expr = list[1];
                     if (name_expr != .symbol)
-                        return preimp.Value{ .err = .bad_def };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"malformed def" ?
+                        , .{expr});
                     const name = name_expr.symbol;
                     const value = try self.evalExpr(list[2]);
                     try self.env.append(.{ .name = name, .value = value });
@@ -73,14 +80,20 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                 if (u.deepEqual(head_expr.symbol, "fn")) {
                     // (fn [symbol*] expr*)
                     if (list.len < 2)
-                        return preimp.Value{ .err = .bad_fn };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"malformed fn" ?
+                        , .{expr});
                     const args_expr = list[1];
                     if (args_expr != .vec)
-                        return preimp.Value{ .err = .bad_fn };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"malformed fn" ?
+                        , .{expr});
                     var args = u.ArrayList([]const u8).init(self.allocator);
                     for (args_expr.vec) |arg_expr| {
                         if (arg_expr != .symbol)
-                            return preimp.Value{ .err = .bad_fn_arg };
+                            return preimp.Value.format(self.allocator,
+                                \\ #"error" #"malformed fn arg" ?
+                            , .{arg_expr});
                         try args.append(arg_expr.symbol);
                     }
                     // TODO only close over referred bindings
@@ -91,12 +104,16 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                 if (u.deepEqual(head_expr.symbol, "if")) {
                     // (if expr expr expr)
                     if (list.len != 4)
-                        return preimp.Value{ .err = .bad_if };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"malformed if" ?
+                        , .{expr});
                     const cond = try self.evalExpr(list[1]);
                     return switch (cond) {
                         .@"true" => self.evalExpr(list[2]),
                         .@"false" => self.evalExpr(list[3]),
-                        else => preimp.Value{ .err = .{ .bad_if_cond = try u.box(self.allocator, cond) } },
+                        else => preimp.Value.format(self.allocator,
+                            \\ #"error" #"non-bool in if" ?
+                        , .{cond}),
                     };
                 }
             }
@@ -111,13 +128,17 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                     switch (builtin) {
                         .get => {
                             if (tail.items.len != 2)
-                                return preimp.Value{ .err = .{ .wrong_number_of_args = .{ .expected = 2, .found = tail.items.len } } };
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" ?
+                                , .{expr});
 
                             const map = tail.items[0];
                             const key = tail.items[1];
 
                             if (map != .map)
-                                return preimp.Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-map passed to get" ?
+                                , .{map});
 
                             return switch (u.binarySearch(preimp.KeyVal, key, map.map, {}, (struct {
                                 fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
@@ -125,19 +146,25 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                                 }
                             }).compare)) {
                                 .Found => |pos| map.map[pos].val,
-                                .NotFound => preimp.Value{ .err = .not_found },
+                                .NotFound => preimp.Value.format(self.allocator,
+                                    \\ #"error" #"not found" ?
+                                , .{key}),
                             };
                         },
                         .put => {
                             if (tail.items.len != 3)
-                                return preimp.Value{ .err = .{ .wrong_number_of_args = .{ .expected = 3, .found = tail.items.len } } };
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" ?
+                                , .{expr});
 
                             const map = tail.items[0];
                             const key = tail.items[1];
                             const val = tail.items[2];
 
                             if (map != .map)
-                                return preimp.Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-map passed to put" ?
+                                , .{map});
 
                             var key_vals = try u.ArrayList(preimp.KeyVal).initCapacity(self.allocator, map.map.len);
                             try key_vals.appendSlice(map.map);
@@ -161,15 +188,17 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
                     defer self.env.shrinkRetainingCapacity(fn_env_start);
                     try self.env.appendSlice(fun.env);
                     if (fun.args.len != tail.items.len)
-                        return preimp.Value{ .err = .{
-                            .wrong_number_of_args = .{ .expected = fun.args.len, .found = tail.items.len },
-                        } };
+                        return preimp.Value.format(self.allocator,
+                            \\ #"error" #"wrong number of args" {"expected args" ? "found args" ?}
+                        , .{ fun.args.len, tail.items.len });
                     for (fun.args) |arg, i|
                         try self.env.append(.{ .name = arg, .value = tail.items[i] });
                     return self.evalExprs(fun.body);
                 },
                 else => {
-                    return preimp.Value{ .err = .{ .bad_apply_head = try u.box(self.allocator, head) } };
+                    return preimp.Value.format(self.allocator,
+                        \\ #"error" #"can't call" ?
+                    , .{head});
                 },
             }
         },

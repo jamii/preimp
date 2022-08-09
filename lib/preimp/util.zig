@@ -20,6 +20,11 @@ pub fn panic(comptime fmt: []const u8, args: anytype) noreturn {
     @panic(message);
 }
 
+pub fn assert(b: bool) void {
+    if (!b)
+        panic("Assert failed", .{});
+}
+
 pub fn oom() noreturn {
     @panic("Out of memory");
 }

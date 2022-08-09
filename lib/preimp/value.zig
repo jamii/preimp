@@ -15,7 +15,6 @@ pub const ValueTag = enum {
     tagged,
     builtin,
     fun,
-    err,
 };
 
 pub const Value = union(ValueTag) {
@@ -25,14 +24,108 @@ pub const Value = union(ValueTag) {
     symbol: []const u8,
     string: []const u8,
     number: f64,
-    list: []const Value,
-    vec: []const Value,
+    list: []Value,
+    vec: []Value,
     // sorted by key
-    map: []const KeyVal,
+    map: []KeyVal,
     tagged: Tagged,
     builtin: Builtin,
     fun: Fun,
-    err: Error,
+
+    pub fn fromZig(allocator: u.Allocator, zig_value: anytype) !Value {
+        const T = @TypeOf(zig_value);
+        switch (T) {
+            Value => return zig_value,
+            []const u8 => return Value{ .string = zig_value },
+            else => {},
+        }
+        switch (@typeInfo(T)) {
+            .Int => return Value{ .number = @intToFloat(f64, zig_value) },
+            .Float => return Value{ .number = @floatCast(f64, zig_value) },
+            .Struct => |info| {
+                var map_values = u.ArrayList(KeyVal).init(allocator);
+                inline for (info.fields) |field| {
+                    try map_values.push(.{
+                        .key = try Value.fromZig(allocator, field.name),
+                        .val = try Value.fromZig(allocator, @field(zig_value, field.name)),
+                    });
+                }
+                return Value{ .map = map_values.toOwnedSlice() };
+            },
+            .Enum => |info| {
+                inline for (info.fields) |field| {
+                    if (@enumToInt(zig_value) == field.value) {
+                        return Value{ .string = field.name };
+                    }
+                }
+                unreachable;
+            },
+            else => @compileError("Don't know how to turn value of type " ++ @typeName(T) ++ " into preimp.Value"),
+        }
+    }
+
+    pub fn errorFromZig(allocator: u.Allocator, zig_value: anytype) !Value {
+        return Value{ .tagged = .{
+            .key = try u.box(allocator, try Value.fromZig(allocator, "error")),
+            .val = try u.box(allocator, try Value.fromZig(allocator, zig_value)),
+        } };
+    }
+
+    pub fn format(allocator: u.Allocator, source: [:0]const u8, args: anytype) !Value {
+        var arg_values: [args.len]Value = undefined;
+        comptime var i: usize = 0;
+        inline while (i < args.len) : (i += 1)
+            arg_values[i] = try Value.fromZig(allocator, args[i]);
+        return Value.formatValues(allocator, source, &arg_values);
+    }
+
+    pub fn formatValues(allocator: u.Allocator, source: [:0]const u8, args: []const Value) !Value {
+        // TODO be careful about leaking tokens etc
+        var parser = try preimp.Parser.init(allocator, source);
+        const exprs = try parser.parseExprs(null, .eof);
+        u.assert(exprs.len == 1);
+        var value = exprs[0];
+        var arg_ix: usize = 0;
+        value.replace(&arg_ix, args);
+        u.assert(arg_ix == args.len);
+        return value;
+    }
+
+    pub fn replace(self: *Value, arg_ix: *usize, args: []const Value) void {
+        switch (self.*) {
+            .nil, .@"true", .@"false", .string, .number, .builtin, .fun => {},
+            .symbol => |symbol| {
+                if (u.deepEqual(symbol, "?")) {
+                    self.* = args[arg_ix.*];
+                    arg_ix.* += 1;
+                }
+            },
+            .list => |list| {
+                for (list) |*elem|
+                    elem.replace(arg_ix, args);
+            },
+            .vec => |vec| {
+                for (vec) |*elem|
+                    elem.replace(arg_ix, args);
+            },
+            .map => |map| {
+                for (map) |*elem| {
+                    elem.key.replace(arg_ix, args);
+                    elem.val.replace(arg_ix, args);
+                }
+            },
+            .tagged => |*tagged| {
+                tagged.key.replace(arg_ix, args);
+                tagged.val.replace(arg_ix, args);
+            },
+        }
+    }
+
+    pub fn isError(self: Value) bool {
+        return self == .tagged and
+            self.tagged.key.* == .string and
+            u.deepEqual(self.tagged.key.string, "error");
+    }
 
     pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
         switch (self) {
@@ -108,14 +201,6 @@ pub const Value = union(ValueTag) {
                 try writer.writeAll("<fn>");
                 try writer.writeAll("\n");
             },
-            .err => |err| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("#\n");
-                try writer.writeByteNTimes(' ', indent + 4);
-                try writer.writeAll("\"error\"\n");
-                try writer.writeByteNTimes(' ', indent + 4);
-                try std.fmt.format(writer, "{}\n", .{err});
-            },
         }
     }
 };
@@ -144,34 +229,4 @@ pub const Fun = struct {
 pub const Binding = struct {
     name: []const u8,
     value: Value,
-};
-
-pub const Error = union(enum) {
-    // parse errors
-    unexpected: struct {
-        expected: preimp.Tokenizer.Token,
-        found: preimp.Tokenizer.Token,
-    },
-    invalid_number,
-    invalid_string,
-    map_with_odd_elems,
-    tokenizer_error,
-    tag_ended_early,
-
-    // eval errors
-    undef: []const u8,
-    empty_list,
-    bad_def,
-    bad_fn,
-    bad_if,
-    bad_for,
-    bad_apply_head: *Value,
-    bad_if_cond: *Value,
-    bad_fn_arg,
-    wrong_number_of_args: struct {
-        expected: usize,
-        found: usize,
-    },
-    not_a_map: *Value,
-    not_found,
 };
