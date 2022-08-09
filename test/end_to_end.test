@@ -120,23 +120,23 @@ nil
 ---
 #
     "error"
-    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 2, .found = 1 } }
+    Error{ .wrong_number_of_args = lib.preimp.value.struct:171:27{ .expected = 2, .found = 1 } }
 
 (get {} "a" "b")
 ---
 #
     "error"
-    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 2, .found = 3 } }
+    Error{ .wrong_number_of_args = lib.preimp.value.struct:171:27{ .expected = 2, .found = 3 } }
 
 
 (put {} "a")
 ---
 #
     "error"
-    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 3, .found = 2 } }
+    Error{ .wrong_number_of_args = lib.preimp.value.struct:171:27{ .expected = 3, .found = 2 } }
 
 (put {} "a" "b" "c")
 ---
 #
     "error"
-    Error{ .wrong_number_of_args = lib.preimp.Evaluator.struct:167:27{ .expected = 3, .found = 4 } }
+    Error{ .wrong_number_of_args = lib.preimp.value.struct:171:27{ .expected = 3, .found = 4 } }

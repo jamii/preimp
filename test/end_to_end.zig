@@ -55,14 +55,14 @@ pub fn main() anyerror!void {
             defer arena.deinit();
 
             var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, source));
-            const expr_ixes = try parser.parseExprs(null, .eof);
-            var evaluator = preimp.Evaluator.init(arena.allocator(), parser.exprs.items);
-            const value = try evaluator.evalExprs(expr_ixes);
+            const exprs = try parser.parseExprs(null, .eof);
+            var evaluator = preimp.Evaluator.init(arena.allocator());
+            const value = try evaluator.evalExprs(exprs);
 
             var bytes = u.ArrayList(u8).init(allocator);
             defer bytes.deinit();
             const writer = bytes.writer();
-            try preimp.Evaluator.Value.dumpInto(writer, 0, value);
+            try preimp.Value.dumpInto(writer, 0, value);
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;

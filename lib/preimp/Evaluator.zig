@@ -4,205 +4,41 @@ const u = preimp.util;
 
 const Evaluator = @This();
 allocator: u.Allocator,
-exprs: []const preimp.Parser.Expr,
-env: u.ArrayList(Binding),
+env: u.ArrayList(preimp.Binding),
 
-pub const ExprIx = usize;
-
-pub const ValueTag = enum {
-    nil,
-    @"true",
-    @"false",
-    symbol,
-    string,
-    number,
-    list,
-    vec,
-    map,
-    tagged,
-    builtin,
-    fun,
-    err,
-};
-
-pub const Value = union(ValueTag) {
-    nil,
-    @"true",
-    @"false",
-    symbol: []const u8,
-    string: []const u8,
-    number: f64,
-    list: []const Value,
-    vec: []const Value,
-    // sorted by key
-    map: []const KeyVal,
-    tagged: Tagged,
-    builtin: Builtin,
-    fun: Fun,
-    err: Error,
-
-    pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
-        switch (self) {
-            .nil => {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("nil");
-                try writer.writeAll("\n");
-            },
-            .@"true" => {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("true");
-                try writer.writeAll("\n");
-            },
-            .@"false" => {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("false");
-                try writer.writeAll("\n");
-            },
-            .symbol => |symbol| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll(symbol);
-                try writer.writeAll("\n");
-            },
-            .string => |string| {
-                try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "\"{}\"", .{std.zig.fmtEscapes(string)});
-                try writer.writeAll("\n");
-            },
-            .number => |number| {
-                try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "{}", .{number});
-                try writer.writeAll("\n");
-            },
-            .list => |list| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("(\n");
-                for (list) |value|
-                    try Value.dumpInto(writer, indent + 4, value);
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll(")\n");
-            },
-            .vec => |vec| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("[\n");
-                for (vec) |value|
-                    try Value.dumpInto(writer, indent + 4, value);
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("]\n");
-            },
-            .map => |map| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("{\n");
-                for (map) |key_val| {
-                    try Value.dumpInto(writer, indent + 4, key_val.key);
-                    try Value.dumpInto(writer, indent + 4, key_val.val);
-                }
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("}\n");
-            },
-            .tagged => |tagged| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("#\n");
-                try Value.dumpInto(writer, indent + 4, tagged.key.*);
-                try Value.dumpInto(writer, indent + 4, tagged.val.*);
-            },
-            .builtin => |builtin| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll(std.meta.tagName(builtin));
-                try writer.writeAll("\n");
-            },
-            .fun => |_| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("<fn>");
-                try writer.writeAll("\n");
-            },
-            .err => |err| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("#\n");
-                try writer.writeByteNTimes(' ', indent + 4);
-                try writer.writeAll("\"error\"\n");
-                try writer.writeByteNTimes(' ', indent + 4);
-                try std.fmt.format(writer, "{}\n", .{err});
-            },
-        }
-    }
-};
-
-pub const KeyVal = struct {
-    key: Value,
-    val: Value,
-};
-
-pub const Tagged = struct {
-    key: *Value,
-    val: *Value,
-};
-
-pub const Builtin = enum {
-    get,
-    put,
-};
-
-pub const Fun = struct {
-    env: []const Binding,
-    args: []const []const u8,
-    body: []const ExprIx,
-};
-
-pub const Binding = struct {
-    name: []const u8,
-    value: Value,
-};
-
-pub const Error = union(enum) {
-    undef: []const u8,
-    empty_list,
-    parse_error: preimp.Parser.Error,
-    bad_def,
-    bad_fn,
-    bad_if,
-    bad_for,
-    bad_apply_head: *Value,
-    bad_if_cond: *Value,
-    bad_fn_arg,
-    wrong_number_of_args: struct {
-        expected: usize,
-        found: usize,
-    },
-    not_a_map: *Value,
-    not_found,
-};
-
-pub fn init(allocator: u.Allocator, exprs: []const preimp.Parser.Expr) Evaluator {
+pub fn init(allocator: u.Allocator) Evaluator {
     return Evaluator{
         .allocator = allocator,
-        .exprs = exprs,
-        .env = u.ArrayList(Binding).init(allocator),
+        .env = u.ArrayList(preimp.Binding).init(allocator),
     };
 }
 
-pub fn evalExprs(self: *Evaluator, expr_ixes: []const ExprIx) error{OutOfMemory}!Value {
+pub fn evalExprs(self: *Evaluator, exprs: []const preimp.Value) error{OutOfMemory}!preimp.Value {
     const env_start = self.env.items.len;
     defer self.env.shrinkRetainingCapacity(env_start);
-    var value: Value = .nil;
-    for (expr_ixes) |expr_ix| {
-        value = try self.evalExpr(expr_ix);
+    var value: preimp.Value = .nil;
+    for (exprs) |expr| {
+        value = try self.evalExpr(expr);
     }
     return value;
 }
 
-pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
-    const expr = self.exprs[expr_ix];
+pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.Value {
     switch (expr) {
+        .nil,
+        .@"true",
+        .@"false",
+        .string,
+        .number,
+        .builtin,
+        .fun,
+        .err,
+        => return expr,
         .symbol => |symbol| {
-            // builtin values
-            if (u.deepEqual(symbol, "nil")) return Value{ .nil = {} };
-            if (u.deepEqual(symbol, "true")) return Value{ .@"true" = {} };
-            if (u.deepEqual(symbol, "false")) return Value{ .@"false" = {} };
-
             // builtin functions
-            inline for (@typeInfo(Builtin).Enum.fields) |field|
+            inline for (@typeInfo(preimp.Builtin).Enum.fields) |field|
                 if (u.deepEqual(symbol, field.name))
-                    return Value{ .builtin = @intToEnum(Builtin, field.value) };
+                    return preimp.Value{ .builtin = @intToEnum(preimp.Builtin, field.value) };
 
             // regular symbols
             var i = self.env.items.len;
@@ -213,68 +49,61 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
             }
 
             // undefined symbol
-            return Value{ .err = .{ .undef = symbol } };
-        },
-        .string => |string| {
-            return Value{ .string = string };
-        },
-        .number => |number| {
-            return Value{ .number = number };
+            return preimp.Value{ .err = .{ .undef = symbol } };
         },
         .list => |list| {
             if (list.len == 0)
-                return Value{ .err = .empty_list };
+                return preimp.Value{ .err = .empty_list };
 
             // special forms
-            const head_expr = self.exprs[list[0]];
+            const head_expr = list[0];
             if (head_expr == .symbol) {
                 if (u.deepEqual(head_expr.symbol, "def")) {
                     // (def symbol expr)
                     if (list.len != 3)
-                        return Value{ .err = .bad_def };
-                    const name_expr = self.exprs[list[1]];
+                        return preimp.Value{ .err = .bad_def };
+                    const name_expr = list[1];
                     if (name_expr != .symbol)
-                        return Value{ .err = .bad_def };
+                        return preimp.Value{ .err = .bad_def };
                     const name = name_expr.symbol;
                     const value = try self.evalExpr(list[2]);
                     try self.env.append(.{ .name = name, .value = value });
-                    return Value{ .nil = {} };
+                    return preimp.Value{ .nil = {} };
                 }
                 if (u.deepEqual(head_expr.symbol, "fn")) {
                     // (fn [symbol*] expr*)
                     if (list.len < 2)
-                        return Value{ .err = .bad_fn };
-                    const args_expr = self.exprs[list[1]];
+                        return preimp.Value{ .err = .bad_fn };
+                    const args_expr = list[1];
                     if (args_expr != .vec)
-                        return Value{ .err = .bad_fn };
+                        return preimp.Value{ .err = .bad_fn };
                     var args = u.ArrayList([]const u8).init(self.allocator);
-                    for (args_expr.vec) |arg_expr_ix| {
-                        const arg_expr = self.exprs[arg_expr_ix];
+                    for (args_expr.vec) |arg_expr| {
                         if (arg_expr != .symbol)
-                            return Value{ .err = .bad_fn_arg };
+                            return preimp.Value{ .err = .bad_fn_arg };
                         try args.append(arg_expr.symbol);
                     }
                     // TODO only close over referred bindings
-                    const env = try self.allocator.dupe(Binding, self.env.items);
+                    const env = try self.allocator.dupe(preimp.Binding, self.env.items);
                     const body = list[2..];
-                    return Value{ .fun = .{ .env = env, .args = args.toOwnedSlice(), .body = body } };
+                    return preimp.Value{ .fun = .{ .env = env, .args = args.toOwnedSlice(), .body = body } };
                 }
                 if (u.deepEqual(head_expr.symbol, "if")) {
                     // (if expr expr expr)
                     if (list.len != 4)
-                        return Value{ .err = .bad_if };
+                        return preimp.Value{ .err = .bad_if };
                     const cond = try self.evalExpr(list[1]);
                     return switch (cond) {
                         .@"true" => self.evalExpr(list[2]),
                         .@"false" => self.evalExpr(list[3]),
-                        else => Value{ .err = .{ .bad_if_cond = try u.box(self.allocator, cond) } },
+                        else => preimp.Value{ .err = .{ .bad_if_cond = try u.box(self.allocator, cond) } },
                     };
                 }
             }
 
             // regular forms
             const head = try self.evalExpr(list[0]);
-            var tail = try u.ArrayList(Value).initCapacity(self.allocator, list.len - 1);
+            var tail = try u.ArrayList(preimp.Value).initCapacity(self.allocator, list.len - 1);
             for (list[1..]) |tail_expr_ix|
                 try tail.append(try self.evalExpr(tail_expr_ix));
             switch (head) {
@@ -282,39 +111,39 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                     switch (builtin) {
                         .get => {
                             if (tail.items.len != 2)
-                                return Value{ .err = .{ .wrong_number_of_args = .{ .expected = 2, .found = tail.items.len } } };
+                                return preimp.Value{ .err = .{ .wrong_number_of_args = .{ .expected = 2, .found = tail.items.len } } };
 
                             const map = tail.items[0];
                             const key = tail.items[1];
 
                             if (map != .map)
-                                return Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
+                                return preimp.Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
 
-                            return switch (u.binarySearch(KeyVal, key, map.map, {}, (struct {
-                                fn compare(_: void, key_: Value, key_val: KeyVal) std.math.Order {
+                            return switch (u.binarySearch(preimp.KeyVal, key, map.map, {}, (struct {
+                                fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
                                     return u.deepCompare(key_, key_val.key);
                                 }
                             }).compare)) {
                                 .Found => |pos| map.map[pos].val,
-                                .NotFound => Value{ .err = .not_found },
+                                .NotFound => preimp.Value{ .err = .not_found },
                             };
                         },
                         .put => {
                             if (tail.items.len != 3)
-                                return Value{ .err = .{ .wrong_number_of_args = .{ .expected = 3, .found = tail.items.len } } };
+                                return preimp.Value{ .err = .{ .wrong_number_of_args = .{ .expected = 3, .found = tail.items.len } } };
 
                             const map = tail.items[0];
                             const key = tail.items[1];
                             const val = tail.items[2];
 
                             if (map != .map)
-                                return Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
+                                return preimp.Value{ .err = .{ .not_a_map = try u.box(self.allocator, map) } };
 
-                            var key_vals = try u.ArrayList(KeyVal).initCapacity(self.allocator, map.map.len);
+                            var key_vals = try u.ArrayList(preimp.KeyVal).initCapacity(self.allocator, map.map.len);
                             try key_vals.appendSlice(map.map);
 
-                            switch (u.binarySearch(KeyVal, key, key_vals.items, {}, (struct {
-                                fn compare(_: void, key_: Value, key_val: KeyVal) std.math.Order {
+                            switch (u.binarySearch(preimp.KeyVal, key, key_vals.items, {}, (struct {
+                                fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
                                     return u.deepCompare(key_, key_val.key);
                                 }
                             }).compare)) {
@@ -322,7 +151,7 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                                 .NotFound => |pos| try key_vals.insert(pos, .{ .key = key, .val = val }),
                             }
 
-                            return Value{ .map = key_vals.toOwnedSlice() };
+                            return preimp.Value{ .map = key_vals.toOwnedSlice() };
                         },
                     }
                 },
@@ -332,7 +161,7 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                     defer self.env.shrinkRetainingCapacity(fn_env_start);
                     try self.env.appendSlice(fun.env);
                     if (fun.args.len != tail.items.len)
-                        return Value{ .err = .{
+                        return preimp.Value{ .err = .{
                             .wrong_number_of_args = .{ .expected = fun.args.len, .found = tail.items.len },
                         } };
                     for (fun.args) |arg, i|
@@ -340,38 +169,34 @@ pub fn evalExpr(self: *Evaluator, expr_ix: ExprIx) error{OutOfMemory}!Value {
                     return self.evalExprs(fun.body);
                 },
                 else => {
-                    return Value{ .err = .{ .bad_apply_head = try u.box(self.allocator, head) } };
+                    return preimp.Value{ .err = .{ .bad_apply_head = try u.box(self.allocator, head) } };
                 },
             }
         },
         .vec => |vec| {
-            var body = try u.ArrayList(Value).initCapacity(self.allocator, vec.len);
+            var body = try u.ArrayList(preimp.Value).initCapacity(self.allocator, vec.len);
             for (vec) |body_expr_ix|
                 try body.append(try self.evalExpr(body_expr_ix));
-            return Value{ .vec = body.toOwnedSlice() };
+            return preimp.Value{ .vec = body.toOwnedSlice() };
         },
         .map => |map| {
-            var body = try u.ArrayList(KeyVal).initCapacity(self.allocator, @divTrunc(map.len, 2));
-            var i: usize = 0;
-            while (i < map.len) : (i += 2) {
-                const key = try self.evalExpr(map[i]);
-                const val = try self.evalExpr(map[i + 1]);
+            var body = try u.ArrayList(preimp.KeyVal).initCapacity(self.allocator, @divTrunc(map.len, 2));
+            for (map) |key_val| {
+                const key = try self.evalExpr(key_val.key);
+                const val = try self.evalExpr(key_val.val);
                 try body.append(.{ .key = key, .val = val });
             }
             u.deepSort(body.items);
             // TODO check no duplicate values
-            return Value{ .map = body.toOwnedSlice() };
+            return preimp.Value{ .map = body.toOwnedSlice() };
         },
         .tagged => |tagged| {
-            const key = try self.evalExpr(tagged.key);
-            const val = try self.evalExpr(tagged.val);
-            return Value{ .tagged = .{
+            const key = try self.evalExpr(tagged.key.*);
+            const val = try self.evalExpr(tagged.val.*);
+            return preimp.Value{ .tagged = .{
                 .key = try u.box(self.allocator, key),
                 .val = try u.box(self.allocator, val),
             } };
-        },
-        .err => |err| {
-            return Value{ .err = .{ .parse_error = err } };
         },
     }
 }
@@ -381,9 +206,9 @@ fn testEval(source: [:0]const u8, expected: []const u8) !void {
     defer arena.deinit();
     var parser = try preimp.Parser.init(arena.allocator(), source);
     const expr_ixes = try parser.parseExprs(.eof);
-    var evaluator = Evaluator.init(arena.allocator(), parser.exprs.items);
+    var evaluator = Evaluator.init(arena.allocator(), parser.values.items);
     const value = try evaluator.evalExprs(expr_ixes);
     var found = u.ArrayList(u8).init(arena.allocator());
-    try Value.dumpInto(found.writer(), 0, value);
+    try preimp.Value.dumpInto(found.writer(), 0, value);
     try std.testing.expectEqualStrings(expected, found.items);
 }

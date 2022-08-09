@@ -8,39 +8,8 @@ source: [:0]const u8,
 token_ix: TokenIx,
 tokens: [:.eof]const preimp.Tokenizer.Token,
 token_locs: []const [2]usize,
-exprs: u.ArrayList(Expr),
-expr_locs: u.ArrayList([2]TokenIx),
 
 pub const TokenIx = usize;
-pub const ExprIx = usize;
-
-pub const Expr = union(enum) {
-    symbol: []const u8,
-    string: []const u8,
-    number: f64,
-    list: []const ExprIx,
-    vec: []const ExprIx,
-    map: []const ExprIx,
-    tagged: Tagged,
-    err: Error,
-};
-
-pub const Tagged = struct {
-    key: ExprIx,
-    val: ExprIx,
-};
-
-pub const Error = union(enum) {
-    unexpected: struct {
-        expected: preimp.Tokenizer.Token,
-        found: preimp.Tokenizer.Token,
-    },
-    invalid_number,
-    invalid_string,
-    map_with_odd_elems,
-    tokenizer_error,
-    tag_ended_early,
-};
 
 pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
     var tokens = u.ArrayList(preimp.Tokenizer.Token).init(allocator);
@@ -61,23 +30,28 @@ pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
         .token_ix = 0,
         .tokens = tokens_slice[0 .. tokens_slice.len - 1 :.eof],
         .token_locs = token_locs.toOwnedSlice(),
-        .exprs = u.ArrayList(Expr).init(allocator),
-        .expr_locs = u.ArrayList([2]TokenIx).init(allocator),
     };
 }
 
-fn pushExpr(self: *Parser, expr_ixes: *u.ArrayList(ExprIx), expr: Expr, start: TokenIx) !void {
-    const expr_ix = self.exprs.items.len;
-    try self.exprs.append(expr);
-    try self.expr_locs.append(.{ start, self.token_ix });
-    try expr_ixes.append(expr_ix);
+fn boxValue(self: *Parser, value: preimp.Value) !*preimp.Value {
+    // TODO add meta for source location
+    const value_box = try self.allocator.create(preimp.Value);
+    value_box.* = value;
+    return value_box;
 }
 
-pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]const ExprIx {
-    var expr_ixes = u.ArrayList(ExprIx).init(self.allocator);
+fn pushValue(self: *Parser, values: *u.ArrayList(preimp.Value), value: preimp.Value, start: TokenIx) !void {
+    // TODO add meta for source location
+    _ = self;
+    _ = start;
+    try values.append(value);
+}
+
+pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]const preimp.Value {
+    var values = u.ArrayList(preimp.Value).init(self.allocator);
     while (true) {
         if (max_exprs_o) |max_exprs|
-            if (expr_ixes.items.len >= max_exprs)
+            if (values.items.len >= max_exprs)
                 break;
         const start = self.token_ix;
         const token = self.tokens[start];
@@ -86,130 +60,99 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .symbol => {
                 const token_loc = self.token_locs[start];
                 const bytes = self.source[token_loc[0]..token_loc[1]];
-                try self.pushExpr(&expr_ixes, .{ .symbol = bytes }, start);
+                const expr =
+                    if (u.deepEqual(bytes, "nil"))
+                    preimp.Value{ .nil = {} }
+                else if (u.deepEqual(bytes, "true"))
+                    preimp.Value{ .@"true" = {} }
+                else if (u.deepEqual(bytes, "false"))
+                    preimp.Value{ .@"false" = {} }
+                else
+                    preimp.Value{ .symbol = bytes };
+                try self.pushValue(&values, expr, start);
             },
             .string => {
                 const token_loc = self.token_locs[start];
                 // TODO handle escapes
                 const bytes = self.source[token_loc[0]..token_loc[1]];
                 const expr = if (std.zig.string_literal.parseAlloc(self.allocator, bytes)) |string|
-                    Expr{ .string = string }
+                    preimp.Value{ .string = string }
                 else |_|
-                    Expr{ .err = .invalid_string };
-                try self.pushExpr(&expr_ixes, expr, start);
+                    preimp.Value{ .err = .invalid_string };
+                try self.pushValue(&values, expr, start);
             },
             .number => {
                 const token_loc = self.token_locs[start];
                 const bytes = self.source[token_loc[0]..token_loc[1]];
                 const expr = if (std.fmt.parseFloat(f64, bytes)) |number|
-                    Expr{ .number = number }
+                    preimp.Value{ .number = number }
                 else |_|
-                    Expr{ .err = .invalid_number };
-                try self.pushExpr(&expr_ixes, expr, start);
+                    preimp.Value{ .err = .invalid_number };
+                try self.pushValue(&values, expr, start);
             },
             .open_list => {
-                const list_expr_ixes = try self.parseExprs(null, .close_list);
-                try self.pushExpr(&expr_ixes, .{ .list = list_expr_ixes }, start);
+                const list_values = try self.parseExprs(null, .close_list);
+                try self.pushValue(&values, .{ .list = list_values }, start);
             },
             .open_vec => {
-                const vec_expr_ixes = try self.parseExprs(null, .close_vec);
-                try self.pushExpr(&expr_ixes, .{ .vec = vec_expr_ixes }, start);
+                const vec_values = try self.parseExprs(null, .close_vec);
+                try self.pushValue(&values, .{ .vec = vec_values }, start);
             },
             .open_map => {
-                const map_expr_ixes = try self.parseExprs(null, .close_map);
-                const expr = if (map_expr_ixes.len % 2 == 0)
-                    Expr{ .map = map_expr_ixes }
-                else
-                    Expr{ .err = .map_with_odd_elems };
-                try self.pushExpr(&expr_ixes, expr, start);
+                const map_exprs = try self.parseExprs(null, .close_map);
+                if (map_exprs.len % 2 == 1) {
+                    try self.pushValue(&values, .{ .err = .map_with_odd_elems }, start);
+                } else {
+                    var map_values = try u.ArrayList(preimp.KeyVal).initCapacity(self.allocator, @divTrunc(map_exprs.len, 2));
+                    var i: usize = 0;
+                    while (i < map_exprs.len) : (i += 2) {
+                        const key = map_exprs[i];
+                        const val = map_exprs[i + 1];
+                        try map_values.append(.{ .key = key, .val = val });
+                    }
+                    u.deepSort(map_values.items);
+                    // TODO check no duplicate values
+                    try self.pushValue(&values, .{ .map = map_values.toOwnedSlice() }, start);
+                }
             },
             .start_tag => {
-                const tag_expr_ixes = try self.parseExprs(2, .eof);
-                const expr = if (tag_expr_ixes.len != 2)
-                    Expr{ .err = .tag_ended_early }
+                const tag_values = try self.parseExprs(2, .eof);
+                const expr = if (tag_values.len != 2)
+                    preimp.Value{ .err = .tag_ended_early }
                 else
-                    Expr{ .tagged = .{ .key = tag_expr_ixes[0], .val = tag_expr_ixes[1] } };
-                try self.pushExpr(&expr_ixes, expr, start);
+                    preimp.Value{ .tagged = .{
+                        .key = try self.boxValue(tag_values[0]),
+                        .val = try self.boxValue(tag_values[1]),
+                    } };
+                try self.pushValue(&values, expr, start);
             },
             .close_list, .close_vec, .close_map, .eof => {
                 if (token != closing_token) {
                     // pretend we saw closing_token before token
-                    const expr = Expr{ .err = .{ .unexpected = .{ .expected = closing_token, .found = token } } };
-                    try self.pushExpr(&expr_ixes, expr, start);
+                    const expr = preimp.Value{ .err = .{ .unexpected = .{ .expected = closing_token, .found = token } } };
+                    try self.pushValue(&values, expr, start);
                 }
                 if (token != closing_token or token == .eof)
                     self.token_ix -= 1;
                 break;
             },
             .err => {
-                try self.pushExpr(&expr_ixes, .{ .err = .tokenizer_error }, start);
+                try self.pushValue(&values, .{ .err = .tokenizer_error }, start);
             },
             .comment, .whitespace => continue,
         }
     }
-    return expr_ixes.toOwnedSlice();
-}
-
-pub fn dumpInto(self: Parser, writer: anytype, indent: u32, expr_ixes: []const ExprIx) anyerror!void {
-    for (expr_ixes) |expr_ix| {
-        const expr = self.exprs.items[expr_ix];
-        switch (expr) {
-            .symbol => |symbol| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll(symbol);
-                try writer.writeAll("\n");
-            },
-            .string => |string| {
-                try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "\"{}\"", .{std.zig.fmtEscapes(string)});
-                try writer.writeAll("\n");
-            },
-            .number => |number| {
-                try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "{}", .{number});
-                try writer.writeAll("\n");
-            },
-            .list => |list| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("(\n");
-                try self.dumpInto(writer, indent + 4, list);
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll(")\n");
-            },
-            .vec => |vec| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("[\n");
-                try self.dumpInto(writer, indent + 4, vec);
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("]\n");
-            },
-            .map => |map| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("{\n");
-                try self.dumpInto(writer, indent + 4, map);
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("}\n");
-            },
-            .tagged => |tagged| {
-                try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("#\n");
-                try self.dumpInto(writer, indent + 4, &.{ tagged.key, tagged.val });
-            },
-            .err => |_| {
-                try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "err\n", .{});
-            },
-        }
-    }
+    return values.toOwnedSlice();
 }
 
 fn testParse(source: [:0]const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = try Parser.init(arena.allocator(), source);
-    const expr_ixes = try parser.parseExprs(null, .eof);
+    const values = try parser.parseExprs(null, .eof);
     var found = u.ArrayList(u8).init(arena.allocator());
-    try parser.dumpInto(found.writer(), 0, expr_ixes);
+    for (values) |value|
+        try preimp.Value.dumpInto(found.writer(), 0, value);
     try std.testing.expectEqualStrings(expected, found.items);
 }
 
@@ -240,7 +183,9 @@ test {
         \\    (
         \\        =
         \\        2.0e+00
-        \\        err
+        \\        #
+        \\            "error"
+        \\            Error{ .unexpected = lib.preimp.value.struct:151:17{ .expected = Token.close_list, .found = Token.close_vec } }
         \\    )
         \\]
         \\
@@ -249,7 +194,9 @@ test {
         \\["foo""bar"]
     ,
         \\[
-        \\    err
+        \\    #
+        \\        "error"
+        \\        Error{ .tokenizer_error = void }
         \\]
         \\
     );
@@ -260,7 +207,9 @@ test {
         \\    def
         \\    a
         \\    1.0e+00
-        \\    err
+        \\    #
+        \\        "error"
+        \\        Error{ .unexpected = lib.preimp.value.struct:151:17{ .expected = Token.close_list, .found = Token.eof } }
         \\)
         \\
     );
