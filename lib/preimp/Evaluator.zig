@@ -121,8 +121,11 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
             // regular forms
             const head = try self.evalExpr(list[0]);
             var tail = try u.ArrayList(preimp.Value).initCapacity(self.allocator, list.len - 1);
-            for (list[1..]) |tail_expr_ix|
-                try tail.append(try self.evalExpr(tail_expr_ix));
+            for (list[1..]) |tail_expr|
+                try tail.append(try self.evalExpr(tail_expr));
+            for (tail.items) |tail_value|
+                if (tail_value.isError())
+                    return tail_value;
             switch (head) {
                 .builtin => |builtin| {
                     switch (builtin) {
@@ -204,8 +207,8 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
         },
         .vec => |vec| {
             var body = try u.ArrayList(preimp.Value).initCapacity(self.allocator, vec.len);
-            for (vec) |body_expr_ix|
-                try body.append(try self.evalExpr(body_expr_ix));
+            for (vec) |body_expr|
+                try body.append(try self.evalExpr(body_expr));
             return preimp.Value{ .vec = body.toOwnedSlice() };
         },
         .map => |map| {
@@ -234,9 +237,9 @@ fn testEval(source: [:0]const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = try preimp.Parser.init(arena.allocator(), source);
-    const expr_ixes = try parser.parseExprs(.eof);
+    const exprs = try parser.parseExprs(.eof);
     var evaluator = Evaluator.init(arena.allocator(), parser.values.items);
-    const value = try evaluator.evalExprs(expr_ixes);
+    const value = try evaluator.evalExprs(exprs);
     var found = u.ArrayList(u8).init(arena.allocator());
     try preimp.Value.dumpInto(found.writer(), 0, value);
     try std.testing.expectEqualStrings(expected, found.items);

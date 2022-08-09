@@ -30,14 +30,11 @@ a
 (def a "c")
 (both "a" b)
 ---
-[
-    "a"
+#
+    "error"
     #
-        "error"
-        #
-            "undefined"
-            "b"
-]
+        "undefined"
+        "b"
 
 (def neither (fn [a b]))
 (def both (fn [a b] [a b]))
@@ -192,25 +189,13 @@ nil
     #
         "error"
         #
-            "wrong number of args"
-            (
-                get
-                {
-                    2.0e+00
-                    1.0e+00
-                }
-                2.0e+00
-                #
-                    "error"
-                    #
-                        "unexpected token"
-                        {
-                            "found"
-                            "close_list"
-                            "expected"
-                            "close_vec"
-                        }
-            )
+            "unexpected token"
+            {
+                "found"
+                "close_list"
+                "expected"
+                "close_vec"
+            }
 ]
 
 ["foo""bar"]
@@ -248,3 +233,11 @@ nil
         "bar"
     "quux"
 ]
+
+(get {} (get {} "b"))
+---
+#
+    "error"
+    #
+        "not found"
+        "b"
