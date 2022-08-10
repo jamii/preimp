@@ -490,3 +490,54 @@ false
     "a"
     2.0e+00
 }
+
+(def foo {"a" ["b" "c"]})
+(put! (get (get foo "a") 1) "d")
+---
+(
+    do
+    (
+        put-at!
+        [
+            foo
+            "a"
+            1.0e+00
+        ]
+            "d"
+    )
+)
+
+(def foo {"a" ["b" "c"]})
+(do
+  (put! (get (get foo "a") 0) "d")
+  (put! (get (get foo "a") 1) "e"))
+---
+(
+    do
+    (
+        put-at!
+        [
+            foo
+            "a"
+            0.0e+00
+        ]
+            "d"
+    )
+    (
+        put-at!
+        [
+            foo
+            "a"
+            1.0e+00
+        ]
+            "e"
+    )
+)
+
+(do 42)
+---
+#
+    "error"
+    #
+        "everything inside do must be an action"
+        4.2e+01

@@ -44,6 +44,7 @@ pub fn evalExprInner(self: *Evaluator, expr: preimp.Value, origin: ?*u.ArrayList
         .number,
         .builtin,
         .fun,
+        .actions,
         => return expr,
         .symbol => |symbol| {
             // builtin functions
@@ -364,6 +365,48 @@ pub fn evalExprInner(self: *Evaluator, expr: preimp.Value, origin: ?*u.ArrayList
                                     \\ #"error" #"cannot count" ?
                                 , .{value}),
                             }
+                        },
+                        .@"put!" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+
+                            const old = tail.items[0];
+                            const new = tail.items[1];
+
+                            if (preimp.KeyVal.get(old.meta, preimp.Value.fromInner(.{ .string = "origin" }))) |old_origin| {
+                                if (old_origin.inner != .vec)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"origin should be a vec" ?
+                                    , .{old_origin});
+
+                                return preimp.Value.fromInner(.{ .actions = try self.allocator.dupe(
+                                    preimp.Action,
+                                    &[1]preimp.Action{
+                                        .{
+                                            .origin = old_origin.inner.vec,
+                                            .new = new,
+                                        },
+                                    },
+                                ) });
+                            } else {
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"cannot put! a value with no origin" ?
+                                , .{old});
+                            }
+                        },
+                        .do => {
+                            var actions = u.ArrayList(preimp.Action).init(self.allocator);
+                            for (tail.items) |value| {
+                                if (value.inner != .actions)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"everything inside do must be an action" ?
+                                    , .{value});
+
+                                try actions.appendSlice(value.inner.actions);
+                            }
+                            return preimp.Value.fromInner(.{ .actions = actions.toOwnedSlice() });
                         },
                     }
                 },

@@ -15,6 +15,7 @@ pub const ValueTag = enum {
     tagged,
     builtin,
     fun,
+    actions,
 };
 
 pub const ValueInner = union(ValueTag) {
@@ -31,6 +32,7 @@ pub const ValueInner = union(ValueTag) {
     tagged: Tagged,
     builtin: Builtin,
     fun: Fun,
+    actions: []Action,
 
     pub fn fromZig(allocator: u.Allocator, zig_value: anytype) !ValueInner {
         const T = @TypeOf(zig_value);
@@ -70,7 +72,7 @@ pub const ValueInner = union(ValueTag) {
 
     pub fn replace(self: *ValueInner, arg_ix: *usize, args: []const Value) void {
         switch (self.*) {
-            .nil, .@"true", .@"false", .string, .number, .builtin, .fun, .symbol => {},
+            .nil, .@"true", .@"false", .string, .number, .builtin, .fun, .symbol, .actions => {},
             .list => |list| {
                 for (list) |*elem|
                     elem.replace(arg_ix, args);
@@ -170,6 +172,38 @@ pub const ValueInner = union(ValueTag) {
             .fun => |_| {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("<fn>");
+                try writer.writeAll("\n");
+            },
+            .actions => |actions| {
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("(");
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try writer.writeAll("do");
+                try writer.writeAll("\n");
+                for (actions) |action| {
+                    try writer.writeByteNTimes(' ', indent + 4);
+                    try writer.writeAll("(");
+                    try writer.writeAll("\n");
+                    try writer.writeByteNTimes(' ', indent + 8);
+                    try writer.writeAll("put-at!");
+                    try writer.writeAll("\n");
+                    try writer.writeByteNTimes(' ', indent + 8);
+                    try writer.writeAll("[");
+                    try writer.writeAll("\n");
+                    for (action.origin) |value| {
+                        try Value.dumpInto(writer, indent + 12, value);
+                    }
+                    try writer.writeByteNTimes(' ', indent + 8);
+                    try writer.writeAll("]");
+                    try writer.writeAll("\n");
+                    try Value.dumpInto(writer, indent + 12, action.new);
+                    try writer.writeByteNTimes(' ', indent + 4);
+                    try writer.writeAll(")");
+                    try writer.writeAll("\n");
+                }
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll(")");
                 try writer.writeAll("\n");
             },
         }
@@ -281,6 +315,8 @@ pub const Builtin = enum {
     @"get-meta",
     @"put-meta",
     count,
+    @"put!",
+    do,
 };
 
 pub const Fun = struct {
@@ -292,4 +328,9 @@ pub const Fun = struct {
 pub const Binding = struct {
     name: []const u8,
     value: Value,
+};
+
+pub const Action = struct {
+    origin: []const Value,
+    new: Value,
 };
