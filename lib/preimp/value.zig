@@ -17,7 +17,7 @@ pub const ValueTag = enum {
     fun,
 };
 
-pub const Value = union(ValueTag) {
+pub const ValueInner = union(ValueTag) {
     nil,
     @"true",
     @"false",
@@ -32,30 +32,30 @@ pub const Value = union(ValueTag) {
     builtin: Builtin,
     fun: Fun,
 
-    pub fn fromZig(allocator: u.Allocator, zig_value: anytype) !Value {
+    pub fn fromZig(allocator: u.Allocator, zig_value: anytype) !ValueInner {
         const T = @TypeOf(zig_value);
         switch (T) {
-            Value => return zig_value,
-            []const u8 => return Value{ .string = zig_value },
+            ValueInner => return zig_value,
+            []const u8 => return ValueInner{ .string = zig_value },
             else => {},
         }
         switch (@typeInfo(T)) {
-            .Int, .ComptimeInt => return Value{ .number = @intToFloat(f64, zig_value) },
-            .Float, .ComptimeFloat => return Value{ .number = @floatCast(f64, zig_value) },
+            .Int, .ComptimeInt => return ValueInner{ .number = @intToFloat(f64, zig_value) },
+            .Float, .ComptimeFloat => return ValueInner{ .number = @floatCast(f64, zig_value) },
             .Struct => |info| {
                 var map_values = u.ArrayList(KeyVal).init(allocator);
                 inline for (info.fields) |field| {
-                    try map_values.push(.{
-                        .key = try Value.fromZig(allocator, field.name),
-                        .val = try Value.fromZig(allocator, @field(zig_value, field.name)),
+                    try map_values.append(.{
+                        .key = try ValueInner.fromZig(allocator, field.name),
+                        .val = try ValueInner.fromZig(allocator, @field(zig_value, field.name)),
                     });
                 }
-                return Value{ .map = map_values.toOwnedSlice() };
+                return ValueInner{ .map = map_values.toOwnedSlice() };
             },
             .Enum => |info| {
                 inline for (info.fields) |field| {
                     if (@enumToInt(zig_value) == field.value) {
-                        return Value{ .string = field.name };
+                        return ValueInner{ .string = field.name };
                     }
                 }
                 unreachable;
@@ -64,42 +64,13 @@ pub const Value = union(ValueTag) {
         }
     }
 
-    pub fn errorFromZig(allocator: u.Allocator, zig_value: anytype) !Value {
-        return Value{ .tagged = .{
-            .key = try u.box(allocator, try Value.fromZig(allocator, "error")),
-            .val = try u.box(allocator, try Value.fromZig(allocator, zig_value)),
-        } };
+    pub fn format(allocator: u.Allocator, source: [:0]const u8, args: anytype) !ValueInner {
+        return (try Value.format(allocator, source, args)).inner;
     }
 
-    pub fn format(allocator: u.Allocator, source: [:0]const u8, args: anytype) !Value {
-        var arg_values: [args.len]Value = undefined;
-        comptime var i: usize = 0;
-        inline while (i < args.len) : (i += 1)
-            arg_values[i] = try Value.fromZig(allocator, args[i]);
-        return Value.formatValues(allocator, source, &arg_values);
-    }
-
-    pub fn formatValues(allocator: u.Allocator, source: [:0]const u8, args: []const Value) !Value {
-        // TODO be careful about leaking tokens etc
-        var parser = try preimp.Parser.init(allocator, source);
-        const exprs = try parser.parseExprs(null, .eof);
-        u.assert(exprs.len == 1);
-        var value = exprs[0];
-        var arg_ix: usize = 0;
-        value.replace(&arg_ix, args);
-        u.assert(arg_ix == args.len);
-        return value;
-    }
-
-    pub fn replace(self: *Value, arg_ix: *usize, args: []const Value) void {
+    pub fn replace(self: *ValueInner, arg_ix: *usize, args: []const Value) void {
         switch (self.*) {
-            .nil, .@"true", .@"false", .string, .number, .builtin, .fun => {},
-            .symbol => |symbol| {
-                if (u.deepEqual(symbol, "?")) {
-                    self.* = args[arg_ix.*];
-                    arg_ix.* += 1;
-                }
-            },
+            .nil, .@"true", .@"false", .string, .number, .builtin, .fun, .symbol => {},
             .list => |list| {
                 for (list) |*elem|
                     elem.replace(arg_ix, args);
@@ -121,13 +92,13 @@ pub const Value = union(ValueTag) {
         }
     }
 
-    pub fn isError(self: Value) bool {
+    pub fn isError(self: ValueInner) bool {
         return self == .tagged and
-            self.tagged.key.* == .string and
-            u.deepEqual(self.tagged.key.string, "error");
+            self.tagged.key.inner == .string and
+            u.deepEqual(self.tagged.key.inner.string, "error");
     }
 
-    pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
+    pub fn dumpInto(writer: anytype, indent: u32, self: ValueInner) anyerror!void {
         switch (self) {
             .nil => {
                 try writer.writeByteNTimes(' ', indent);
@@ -205,6 +176,63 @@ pub const Value = union(ValueTag) {
     }
 };
 
+pub const Value = struct {
+    inner: ValueInner,
+    meta: []KeyVal,
+
+    pub fn fromInner(inner: ValueInner) Value {
+        return Value{
+            .inner = inner,
+            .meta = &.{},
+        };
+    }
+
+    pub fn fromZig(allocator: u.Allocator, zig_value: anytype) !Value {
+        if (@TypeOf(zig_value) == Value)
+            return zig_value;
+        const inner = try ValueInner.fromZig(allocator, zig_value);
+        return Value.fromInner(inner);
+    }
+
+    pub fn format(allocator: u.Allocator, source: [:0]const u8, args: anytype) !Value {
+        var arg_values: [args.len]Value = undefined;
+        comptime var i: usize = 0;
+        inline while (i < args.len) : (i += 1)
+            arg_values[i] = try Value.fromZig(allocator, args[i]);
+        return Value.formatValues(allocator, source, &arg_values);
+    }
+
+    pub fn formatValues(allocator: u.Allocator, source: [:0]const u8, args: []const Value) !Value {
+        // TODO be careful about leaking tokens etc
+        var parser = try preimp.Parser.init(allocator, source);
+        const exprs = try parser.parseExprs(null, .eof);
+        u.assert(exprs.len == 1);
+        var value = exprs[0];
+        var arg_ix: usize = 0;
+        value.replace(&arg_ix, args);
+        u.assert(arg_ix == args.len);
+        return value;
+    }
+
+    pub fn replace(self: *Value, arg_ix: *usize, args: []const Value) void {
+        if (self.inner == .symbol and u.deepEqual(self.inner.symbol, "?")) {
+            self.* = args[arg_ix.*];
+            arg_ix.* += 1;
+        } else {
+            self.inner.replace(arg_ix, args);
+            // don't reach into meta
+        }
+    }
+
+    pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
+        try ValueInner.dumpInto(writer, indent, self.inner);
+    }
+
+    pub fn deepCompare(a: Value, b: Value) std.math.Order {
+        return u.deepCompare(a.inner, b.inner);
+    }
+};
+
 pub const KeyVal = struct {
     key: Value,
     val: Value,
@@ -223,6 +251,8 @@ pub const Builtin = enum {
     @"-",
     @"*",
     @"/",
+    @"get-meta",
+    @"put-meta",
 };
 
 pub const Fun = struct {

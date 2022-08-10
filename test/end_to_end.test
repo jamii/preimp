@@ -315,3 +315,31 @@ false
     #
         "division by 0"
         nil
+
+(get-meta "foo")
+---
+{
+    "start token ix"
+    3.0e+00
+    "end token ix"
+    4.0e+00
+}
+
+(put-meta "foo" 42)
+---
+#
+    "error"
+    #
+        "non-map passed to put-meta"
+        4.2e+01
+
+(put-meta "foo" {"test" 42})
+---
+"foo"
+
+(get-meta (put-meta "foo" {"test" 42}))
+---
+{
+    "test"
+    4.2e+01
+}

@@ -33,18 +33,18 @@ pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
     };
 }
 
-fn boxValue(self: *Parser, value: preimp.Value) !*preimp.Value {
-    // TODO add meta for source location
-    const value_box = try self.allocator.create(preimp.Value);
-    value_box.* = value;
-    return value_box;
-}
-
-fn pushValue(self: *Parser, values: *u.ArrayList(preimp.Value), value: preimp.Value, start: TokenIx) !void {
-    // TODO add meta for source location
-    _ = self;
-    _ = start;
-    try values.append(value);
+fn pushValue(self: *Parser, values: *u.ArrayList(preimp.Value), value_inner: preimp.ValueInner, start: TokenIx) !void {
+    const meta = try self.allocator.dupe(preimp.KeyVal, &[2]preimp.KeyVal{
+        .{
+            .key = preimp.Value.fromInner(.{ .string = "start token ix" }),
+            .val = preimp.Value.fromInner(.{ .number = @intToFloat(f64, start) }),
+        },
+        .{
+            .key = preimp.Value.fromInner(.{ .string = "end token ix" }),
+            .val = preimp.Value.fromInner(.{ .number = @intToFloat(f64, self.token_ix) }),
+        },
+    });
+    try values.append(.{ .inner = value_inner, .meta = meta });
 }
 
 pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]preimp.Value {
@@ -62,13 +62,13 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 const bytes = self.source[token_loc[0]..token_loc[1]];
                 const expr =
                     if (u.deepEqual(bytes, "nil"))
-                    preimp.Value{ .nil = {} }
+                    preimp.ValueInner{ .nil = {} }
                 else if (u.deepEqual(bytes, "true"))
-                    preimp.Value{ .@"true" = {} }
+                    preimp.ValueInner{ .@"true" = {} }
                 else if (u.deepEqual(bytes, "false"))
-                    preimp.Value{ .@"false" = {} }
+                    preimp.ValueInner{ .@"false" = {} }
                 else
-                    preimp.Value{ .symbol = bytes };
+                    preimp.ValueInner{ .symbol = bytes };
                 try self.pushValue(&values, expr, start);
             },
             .string => {
@@ -76,9 +76,9 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 // TODO handle escapes
                 const bytes = self.source[token_loc[0]..token_loc[1]];
                 const expr = if (std.zig.string_literal.parseAlloc(self.allocator, bytes)) |string|
-                    preimp.Value{ .string = string }
+                    preimp.ValueInner{ .string = string }
                 else |_|
-                    try preimp.Value.format(self.allocator,
+                    try preimp.ValueInner.format(self.allocator,
                         \\ #"error" #"invalid string" nil
                     , .{});
                 try self.pushValue(&values, expr, start);
@@ -87,9 +87,9 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 const token_loc = self.token_locs[start];
                 const bytes = self.source[token_loc[0]..token_loc[1]];
                 const expr = if (std.fmt.parseFloat(f64, bytes)) |number|
-                    preimp.Value{ .number = number }
+                    preimp.ValueInner{ .number = number }
                 else |_|
-                    try preimp.Value.format(self.allocator,
+                    try preimp.ValueInner.format(self.allocator,
                         \\ #"error" #"invalid number" nil
                     , .{});
                 try self.pushValue(&values, expr, start);
@@ -107,7 +107,7 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 if (map_exprs.len % 2 == 1) {
                     try self.pushValue(
                         &values,
-                        try preimp.Value.format(self.allocator,
+                        try preimp.ValueInner.format(self.allocator,
                             \\ #"error" #"map with odd elems" nil
                         , .{}),
                         start,
@@ -128,13 +128,13 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .start_tag => {
                 const tag_values = try self.parseExprs(2, .eof);
                 const expr = if (tag_values.len != 2)
-                    try preimp.Value.format(self.allocator,
+                    try preimp.ValueInner.format(self.allocator,
                         \\ #"error" #"tag ended early" nil
                     , .{})
                 else
-                    preimp.Value{ .tagged = .{
-                        .key = try self.boxValue(tag_values[0]),
-                        .val = try self.boxValue(tag_values[1]),
+                    preimp.ValueInner{ .tagged = .{
+                        .key = try u.box(self.allocator, tag_values[0]),
+                        .val = try u.box(self.allocator, tag_values[1]),
                     } };
                 try self.pushValue(&values, expr, start);
             },
@@ -142,7 +142,7 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                 if (token != closing_token) {
                     // pretend we saw closing_token before token
                     const expr =
-                        try preimp.Value.format(self.allocator,
+                        try preimp.ValueInner.format(self.allocator,
                         \\ #"error" #"unexpected token" {"expected" ? "found" ?}
                     , .{ closing_token, token });
                     try self.pushValue(&values, expr, start);
@@ -154,7 +154,7 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
             .err => {
                 try self.pushValue(
                     &values,
-                    try preimp.Value.format(self.allocator,
+                    try preimp.ValueInner.format(self.allocator,
                         \\ #"error" #"tokenizer error" nil
                     , .{}),
                     start,

@@ -68,7 +68,7 @@ pub fn main() anyerror!void {
             num_tests += 1;
             if (std.meta.isError(std.testing.expectEqualStrings(expected, found))) {
                 num_failed += 1;
-                std.debug.print("In test:\n{s}", .{source});
+                std.debug.print("In test:\n{s}\n\n", .{source});
             }
 
             if (rewrite_tests) {
