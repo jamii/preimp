@@ -216,6 +216,7 @@ pub const Tagged = struct {
 };
 
 pub const Builtin = enum {
+    @"=",
     get,
     put,
 };

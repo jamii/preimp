@@ -66,8 +66,10 @@ pub fn main() anyerror!void {
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;
-            if (std.meta.isError(std.testing.expectEqualStrings(expected, found)))
+            if (std.meta.isError(std.testing.expectEqualStrings(expected, found))) {
                 num_failed += 1;
+                std.debug.print("In test:\n{s}", .{source});
+            }
 
             if (rewrite_tests) {
                 if (rewritten_tests.items.len > 0)

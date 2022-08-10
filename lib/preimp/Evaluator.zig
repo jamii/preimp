@@ -129,6 +129,17 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
             switch (head) {
                 .builtin => |builtin| {
                     switch (builtin) {
+                        .@"=" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+
+                            return if (u.deepEqual(tail.items[0], tail.items[1]))
+                                preimp.Value{ .@"true" = {} }
+                            else
+                                preimp.Value{ .@"false" = {} };
+                        },
                         .get => {
                             if (tail.items.len != 2)
                                 return preimp.Value.format(self.allocator,
