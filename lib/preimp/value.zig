@@ -236,6 +236,33 @@ pub const Value = struct {
 pub const KeyVal = struct {
     key: Value,
     val: Value,
+
+    pub fn get(key_vals: []const KeyVal, key: Value) ?Value {
+        return switch (u.binarySearch(preimp.KeyVal, key, key_vals, {}, (struct {
+            fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
+                return u.deepCompare(key_, key_val.key);
+            }
+        }).compare)) {
+            .Found => |pos| key_vals[pos].val,
+            .NotFound => null,
+        };
+    }
+
+    pub fn put(allocator: u.Allocator, key_vals: []const KeyVal, key: Value, val: Value) ![]KeyVal {
+        var new_key_vals = try u.ArrayList(preimp.KeyVal).initCapacity(allocator, key_vals.len);
+        try new_key_vals.appendSlice(key_vals);
+
+        switch (u.binarySearch(preimp.KeyVal, key, new_key_vals.items, {}, (struct {
+            fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
+                return u.deepCompare(key_, key_val.key);
+            }
+        }).compare)) {
+            .Found => |pos| new_key_vals.items[pos].val = val,
+            .NotFound => |pos| try new_key_vals.insert(pos, .{ .key = key, .val = val }),
+        }
+
+        return new_key_vals.toOwnedSlice();
+    }
 };
 
 pub const Tagged = struct {
@@ -253,6 +280,7 @@ pub const Builtin = enum {
     @"/",
     @"get-meta",
     @"put-meta",
+    count,
 };
 
 pub const Fun = struct {

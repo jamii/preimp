@@ -343,3 +343,150 @@ false
     "test"
     4.2e+01
 }
+
+(def foo {"a" ["b" "c"]})
+(get-meta (get (get foo "a") 1))
+---
+{
+    "origin"
+    [
+        foo
+        "a"
+        1.0e+00
+    ]
+    "start token ix"
+    1.1e+01
+    "end token ix"
+    1.2e+01
+}
+
+(def bar ["b" "c"])
+(def foo {"a" bar})
+(get-meta (get (get foo "a") 1))
+---
+{
+    "origin"
+    [
+        bar
+        1.0e+00
+    ]
+    "start token ix"
+    8.0e+00
+    "end token ix"
+    9.0e+00
+}
+
+(def bar ["b" "c"])
+(def foo {"a" (if true bar bar)})
+(get-meta (get (get foo "a") 1))
+---
+{
+    "origin"
+    [
+        bar
+        1.0e+00
+    ]
+    "start token ix"
+    8.0e+00
+    "end token ix"
+    9.0e+00
+}
+
+(def bar (if true ["b" "c"] ["b" "c"]))
+(def foo {"a" bar})
+(get-meta (get (get foo "a") 1))
+---
+{
+    "start token ix"
+    1.3e+01
+    "end token ix"
+    1.4e+01
+}
+
+(def foo {"a" (= 1 1)})
+(get-meta (get foo "a"))
+---
+{
+    "origin"
+    [
+        foo
+        "a"
+    ]
+}
+
+(put [] 0 "a")
+---
+[
+    "a"
+]
+
+(put ["a"] 0 "b")
+---
+[
+    "a"
+]
+
+(put ["a"] 1 "b")
+---
+[
+    "a"
+    "b"
+]
+
+(put ["a"] 2 "b")
+---
+#
+    "error"
+    #
+        "key is past end of vec"
+        2.0e+00
+
+(put ["a"] -1 "b")
+---
+#
+    "error"
+    #
+        "cannot put this key in a vec"
+        -1.0e+00
+
+(put ["a"] 0.5 "b")
+---
+#
+    "error"
+    #
+        "cannot put this key in a vec"
+        5.0e-01
+
+(count [])
+---
+0.0e+00
+
+(count ["a" "b" "c"])
+---
+3.0e+00
+
+(count {})
+---
+0.0e+00
+
+(count {"a" 1 "b" 2})
+---
+2.0e+00
+
+(count "foo")
+---
+#
+    "error"
+    #
+        "cannot count"
+        "foo"
+
+// TODO
+{"a" 1 "a" 2}
+---
+{
+    "a"
+    1.0e+00
+    "a"
+    2.0e+00
+}

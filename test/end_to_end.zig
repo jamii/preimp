@@ -57,7 +57,8 @@ pub fn main() anyerror!void {
             var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, source));
             const exprs = try parser.parseExprs(null, .eof);
             var evaluator = preimp.Evaluator.init(arena.allocator());
-            const value = try evaluator.evalExprs(exprs);
+            var origin = u.ArrayList(preimp.Value).init(arena.allocator());
+            const value = try evaluator.evalExprs(exprs, &origin);
 
             var bytes = u.ArrayList(u8).init(allocator);
             defer bytes.deinit();
