@@ -219,6 +219,10 @@ pub const Builtin = enum {
     @"=",
     get,
     put,
+    @"+",
+    @"-",
+    @"*",
+    @"/",
 };
 
 pub const Fun = struct {

@@ -129,6 +129,87 @@ pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.
             switch (head) {
                 .builtin => |builtin| {
                     switch (builtin) {
+                        .@"+" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+                            const arg0 = tail.items[0];
+                            const arg1 = tail.items[1];
+
+                            if (arg0 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to +" ?
+                                , .{arg0});
+                            if (arg1 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to +" ?
+                                , .{arg1});
+
+                            return preimp.Value{ .number = arg0.number + arg1.number };
+                        },
+                        .@"-" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+                            const arg0 = tail.items[0];
+                            const arg1 = tail.items[1];
+
+                            if (arg0 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to -" ?
+                                , .{arg0});
+                            if (arg1 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to -" ?
+                                , .{arg1});
+
+                            return preimp.Value{ .number = arg0.number - arg1.number };
+                        },
+                        .@"*" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+                            const arg0 = tail.items[0];
+                            const arg1 = tail.items[1];
+
+                            if (arg0 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to *" ?
+                                , .{arg0});
+                            if (arg1 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to *" ?
+                                , .{arg1});
+
+                            return preimp.Value{ .number = arg0.number * arg1.number };
+                        },
+                        .@"/" => {
+                            if (tail.items.len != 2)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                , .{ 2, tail.items.len });
+                            const arg0 = tail.items[0];
+                            const arg1 = tail.items[1];
+
+                            if (arg0 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to /" ?
+                                , .{arg0});
+                            if (arg1 != .number)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"non-number passed to /" ?
+                                , .{arg1});
+
+                            if (arg1.number == 0)
+                                return preimp.Value.format(self.allocator,
+                                    \\ #"error" #"division by 0" nil
+                                , .{});
+
+                            return preimp.Value{ .number = arg0.number / arg1.number };
+                        },
                         .@"=" => {
                             if (tail.items.len != 2)
                                 return preimp.Value.format(self.allocator,
