@@ -10,6 +10,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{
 };
 pub const allocator = gpa.allocator();
 
+extern fn jsLog(string_ptr: usize, string_len: usize) noreturn;
 extern fn jsPanic(string_ptr: usize, string_len: usize) noreturn;
 
 const EvalState = struct {
@@ -65,4 +66,19 @@ pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace) noretur
     std.fmt.format(full_message.writer(), "{s}\n\nTrace:\n{s}", .{ message, stack_trace }) catch
         std.mem.copy(u8, full_message.items[full_message.items.len - 3 .. full_message.items.len], "OOM");
     jsPanic(@ptrToInt(full_message.items.ptr), full_message.items.len);
+}
+
+pub fn log(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    var full_message = std.ArrayList(u8).init(allocator);
+    defer allocator.free(full_message);
+    std.fmt.format(full_message.writer(), "{} {}:", .{ message_level, scope }) catch
+        std.mem.copy(u8, full_message.items[full_message.items.len - 3 .. full_message.items.len], "OOM");
+    std.fmt.format(full_message.writer(), format, args) catch
+        std.mem.copy(u8, full_message.items[full_message.items.len - 3 .. full_message.items.len], "OOM");
+    jsLog(@ptrToInt(full_message.items.ptr), full_message.items.len);
 }

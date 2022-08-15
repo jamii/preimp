@@ -13,13 +13,21 @@ async function Preimp(preimp_url) {
         return string;
     }
 
+    const jsLog = function(string_ptr, string_len) {
+        const string = readString(string_ptr, string_len);
+        console.log(string);
+    }
+
     const jsPanic = function(string_ptr, string_len) {
         const string = readString(string_ptr, string_len);
         console.error(string);
         throw string;
     }
 
-    wasm = await WebAssembly.instantiateStreaming(fetch(preimp_url), {env: {jsPanic: jsPanic}});
+    wasm = await WebAssembly.instantiateStreaming(fetch(preimp_url), {env: {
+        jsLog: jsLog,
+        jsPanic: jsPanic,
+    }});
     const exports = wasm.instance.exports;
 
     const eval = function (source) {
