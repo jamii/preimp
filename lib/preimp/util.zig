@@ -7,7 +7,7 @@ pub const HashMap = std.HashMap;
 
 // TODO should probably preallocate memory for panic message
 pub fn panic(comptime fmt: []const u8, args: anytype) noreturn {
-    var buf = ArrayList(u8).init(std.heap.c_allocator);
+    var buf = ArrayList(u8).init(std.heap.page_allocator);
     var writer = buf.writer();
     const message: []const u8 = message: {
         std.fmt.format(writer, fmt, args) catch |err| {
