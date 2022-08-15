@@ -2,20 +2,22 @@
 
 let
 
-pkgsSrc = builtins.fetchTarball {
-    name = "nixos-21.11";
-    url = "https://github.com/NixOS/nixpkgs/archive/21.11.tar.gz";
-    sha256 = "162dywda2dvfj1248afxc45kcrg83appjd0nmdb541hl7rnncf02";
-};
+#pkgsSrc = builtins.fetchTarball {
+#    name = "nixos-21.11";
+#    url = "https://github.com/NixOS/nixpkgs/archive/21.11.tar.gz";
+#    sha256 = "162dywda2dvfj1248afxc45kcrg83appjd0nmdb541hl7rnncf02";
+#};
 
-pkgs = (import pkgsSrc {});
+#pkgs = (import pkgsSrc {});
+
+pkgs = import <nixpkgs> {};
 
 zig = pkgs.stdenv.mkDerivation {
         name = "zig";
         src = fetchTarball (
             if (pkgs.system == "x86_64-linux") then {
-                url = "https://ziglang.org/builds/zig-linux-x86_64-0.10.0-dev.2473+e498fb155.tar.xz";
-                sha256 = "1iih9wcr5v2k2v384ljv4nalfzgy0kbb0ilz7jdn5gh4h9jhy086";
+                url = "https://ziglang.org/builds/zig-linux-x86_64-0.10.0-dev.3567+95573dbee.tar.xz";
+                sha256 = "0l322i5s5ya7jd4fgia29insyaa4wzqxv3rmdmzjw612d3ivdc2v";
             } else
             throw ("Unknown system " ++ pkgs.system)
         );
@@ -33,11 +35,12 @@ in
 
 pkgs.mkShell rec {
     buildInputs = [
-        pkgs.clojure
-        pkgs.jre
-        pkgs.nixopsUnstable
+        #pkgs.clojure
+        #pkgs.jre
+        #pkgs.nixopsUnstable
+        zig
     ];
-    shellHook = ''
-        export NIX_PATH=${pkgs.path}:nixpkgs=${pkgs.path}:.
-    '';
+    #shellHook = ''
+    #    export NIX_PATH=${pkgs.path}:nixpkgs=${pkgs.path}:.
+    #'';
 }
