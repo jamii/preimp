@@ -36,7 +36,7 @@ async function Preimp(preimp_url) {
         exports.eval();
         const result_ptr = exports.evalResultPtr();
         const result_len = exports.evalResultLen();
-        return readString(result_ptr, result_len);
+        return JSON.parse(readString(result_ptr, result_len));
     }
 
     return {

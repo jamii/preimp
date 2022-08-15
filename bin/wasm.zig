@@ -45,7 +45,7 @@ fn evalInner() !void {
     const value = try evaluator.evalExprs(exprs, &origin);
 
     var eval_result = u.ArrayList(u8).init(allocator);
-    try preimp.Value.dumpInto(eval_result.writer(), 0, value);
+    try u.stringify(value, .{}, eval_result.writer());
     allocator.free(eval_state.result);
     eval_state.result = eval_result.toOwnedSlice();
 }
@@ -62,8 +62,8 @@ pub fn checkIfPanicked() void {
 pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace) noreturn {
     panicked = true;
     var full_message = std.ArrayList(u8).init(allocator);
-    // don't need to free full_message because we won't accept any more function calls
-    std.fmt.format(full_message.writer(), "{s}\n\nTrace:\n{s}", .{ message, stack_trace }) catch
+    defer allocator.free(full_message);
+    std.fmt.format(full_message.writer(), "{s}\n\nTrace:\n{any}", .{ message, stack_trace }) catch
         std.mem.copy(u8, full_message.items[full_message.items.len - 3 .. full_message.items.len], "OOM");
     jsPanic(@ptrToInt(full_message.items.ptr), full_message.items.len);
 }
