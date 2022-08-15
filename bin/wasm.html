@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <script src="./wasm.js"></script>
+  <script>
+    async function run() {
+        const preimp = await Preimp("../zig-out/lib/preimp.wasm");
+        console.log(preimp.wasm.instance.exports.hello(1))
+    }
+    run();
+  </script>
+</head>
+
+<body>
+</body>
+</html>

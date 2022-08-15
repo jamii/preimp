@@ -22,6 +22,18 @@ pub fn build(b: *std.build.Builder) !void {
     //test_step.dependOn(&run.bin.step);
     test_step.dependOn(test_end_to_end.step);
     test_step.dependOn(test_unit_step);
+
+    const wasm = b.addSharedLibrary("preimp", "./bin/wasm.zig", .unversioned);
+    wasm.setBuildMode(mode);
+    wasm.setTarget(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    wasm.setMainPkgPath("./");
+    wasm.install();
+
+    const wasm_step = b.step("wasm", "Build wasm (zig-out/lib/preimp.wasm)");
+    wasm_step.dependOn(&wasm.step);
 }
 
 fn addBin(

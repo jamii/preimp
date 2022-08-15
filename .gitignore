@@ -5,3 +5,4 @@ target
 preimp.db
 secret.nix
 zig-cache
+zig-out
