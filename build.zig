@@ -23,7 +23,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(test_end_to_end.step);
     test_step.dependOn(test_unit_step);
 
-    const wasm = b.addSharedLibrary("preimp", "./bin/wasm.zig", .unversioned);
+    const wasm = b.addSharedLibrary("preimp", "./wasm/wasm.zig", .unversioned);
     wasm.setBuildMode(mode);
     wasm.setTarget(.{
         .cpu_arch = .wasm32,

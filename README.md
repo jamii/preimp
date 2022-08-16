@@ -43,5 +43,5 @@ Build wasm version:
 ``` bash
 zig build wasm
 python3 -m http.server
-$BROWSER localhost:8000/bin/wasm.html
+$BROWSER localhost:8000/wasm/wasm.html
 ```

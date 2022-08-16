@@ -1,6 +1,7 @@
 const std = @import("std");
 const preimp = @import("../lib/preimp.zig");
 const u = preimp.util;
+const json = @import("./json.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{
     .safety = true,
@@ -44,7 +45,7 @@ fn parseInner() !void {
     const exprs = try parser.parseExprs(null, .eof);
 
     var output = u.ArrayList(u8).init(allocator);
-    try u.json.stringify(exprs, .{}, output.writer());
+    try json.stringify(exprs, .{}, output.writer());
     allocator.free(js_args.output);
     js_args.output = output.toOwnedSlice();
 }
@@ -57,15 +58,15 @@ export fn parse() void {
 fn evalInner() !void {
     var arena = u.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var token_stream = u.json.TokenStream.init(js_args.input);
+    var token_stream = json.TokenStream.init(js_args.input);
     @setEvalBranchQuota(10000);
-    const exprs = try u.json.parse([]preimp.Value, &token_stream, .{ .allocator = arena.allocator() });
+    const exprs = try json.parse([]preimp.Value, &token_stream, .{ .allocator = arena.allocator() });
     var evaluator = preimp.Evaluator.init(arena.allocator());
     var origin = u.ArrayList(preimp.Value).init(arena.allocator());
     const value = try evaluator.evalExprs(exprs, &origin);
 
     var output = u.ArrayList(u8).init(allocator);
-    try u.json.stringify(value, .{}, output.writer());
+    try json.stringify(value, .{}, output.writer());
     allocator.free(js_args.output);
     js_args.output = output.toOwnedSlice();
 }

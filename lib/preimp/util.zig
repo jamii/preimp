@@ -1,5 +1,4 @@
 const std = @import("std");
-pub const json = @import("./json.zig");
 
 pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
