@@ -10,55 +10,80 @@ var gpa = std.heap.GeneralPurposeAllocator(.{
 };
 pub const allocator = gpa.allocator();
 
-extern fn jsLog(string_ptr: usize, string_len: usize) noreturn;
-extern fn jsPanic(string_ptr: usize, string_len: usize) noreturn;
+const JsArgs = struct {
+    input: []const u8,
+    output: []const u8,
+};
+var js_args = JsArgs{
+    .input = "",
+    .output = "",
+};
 
-const EvalState = struct {
-    source: ?[:0]const u8,
-    result: []const u8,
-};
-var eval_state = EvalState{
-    .source = null,
-    .result = "",
-};
-export fn evalSourceAlloc(len: usize) usize {
+export fn inputAlloc(len: usize) usize {
     checkIfPanicked();
-    if (eval_state.source) |source| allocator.free(source);
-    eval_state.source = allocator.allocSentinel(u8, len, 0) catch unreachable;
-    return @ptrToInt(eval_state.source.?.ptr);
+    allocator.free(js_args.input);
+    js_args.input = allocator.allocSentinel(u8, len, 0) catch
+        u.panic("OOM", .{});
+    return @ptrToInt(js_args.input.ptr);
 }
-export fn evalResultPtr() usize {
+
+export fn outputPtr() usize {
     checkIfPanicked();
-    return @ptrToInt(eval_state.result.ptr);
+    return @ptrToInt(js_args.output.ptr);
 }
-export fn evalResultLen() usize {
+
+export fn outputLen() usize {
     checkIfPanicked();
-    return eval_state.result.len;
+    return js_args.output.len;
 }
+
+fn parseInner() !void {
+    var arena = u.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, js_args.input));
+    const exprs = try parser.parseExprs(null, .eof);
+
+    var output = u.ArrayList(u8).init(allocator);
+    try u.json.stringify(exprs, .{}, output.writer());
+    allocator.free(js_args.output);
+    js_args.output = output.toOwnedSlice();
+}
+export fn parse() void {
+    checkIfPanicked();
+    parseInner() catch |err|
+        u.panic("{}", .{err});
+}
+
 fn evalInner() !void {
     var arena = u.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var parser = try preimp.Parser.init(arena.allocator(), eval_state.source.?);
-    const exprs = try parser.parseExprs(null, .eof);
+    var token_stream = u.json.TokenStream.init(js_args.input);
+    @setEvalBranchQuota(10000);
+    const exprs = try u.json.parse([]preimp.Value, &token_stream, .{ .allocator = arena.allocator() });
     var evaluator = preimp.Evaluator.init(arena.allocator());
     var origin = u.ArrayList(preimp.Value).init(arena.allocator());
     const value = try evaluator.evalExprs(exprs, &origin);
 
-    var eval_result = u.ArrayList(u8).init(allocator);
-    try u.stringify(value, .{}, eval_result.writer());
-    allocator.free(eval_state.result);
-    eval_state.result = eval_result.toOwnedSlice();
+    var output = u.ArrayList(u8).init(allocator);
+    try u.json.stringify(value, .{}, output.writer());
+    allocator.free(js_args.output);
+    js_args.output = output.toOwnedSlice();
 }
 export fn eval() void {
     checkIfPanicked();
-    evalInner() catch unreachable;
+    evalInner() catch |err|
+        u.panic("{}", .{err});
 }
 
+extern fn jsPanic(string_ptr: usize, string_len: usize) noreturn;
+
 var panicked = false;
+
 pub fn checkIfPanicked() void {
     if (panicked)
-        @panic("Already panicked");
+        u.panic("Already panicked", .{});
 }
+
 pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace) noreturn {
     panicked = true;
     var full_message = std.ArrayList(u8).init(allocator);
@@ -67,6 +92,8 @@ pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace) noretur
         std.mem.copy(u8, full_message.items[full_message.items.len - 3 .. full_message.items.len], "OOM");
     jsPanic(@ptrToInt(full_message.items.ptr), full_message.items.len);
 }
+
+extern fn jsLog(string_ptr: usize, string_len: usize) noreturn;
 
 pub fn log(
     comptime message_level: std.log.Level,

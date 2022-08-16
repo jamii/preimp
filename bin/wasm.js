@@ -30,17 +30,28 @@ async function Preimp(preimp_url) {
     }});
     const exports = wasm.instance.exports;
 
-    const eval = function (source) {
-        const source_ptr = exports.evalSourceAlloc(source.length);
+    const parse = function (source) {
+        const source_ptr = exports.inputAlloc(source.length);
         writeString(source_ptr, source);
+        exports.parse();
+        const output_ptr = exports.outputPtr();
+        const output_len = exports.outputLen();
+        return JSON.parse(readString(output_ptr, output_len));
+    }
+
+    const eval = function (value) {
+        const input = JSON.stringify(value);
+        const input_ptr = exports.inputAlloc(input.length);
+        writeString(input_ptr, input);
         exports.eval();
-        const result_ptr = exports.evalResultPtr();
-        const result_len = exports.evalResultLen();
-        return JSON.parse(readString(result_ptr, result_len));
+        const output_ptr = exports.outputPtr();
+        const output_len = exports.outputLen();
+        return JSON.parse(readString(output_ptr, output_len));
     }
 
     return {
         wasm: wasm,
+        parse: parse,
         eval: eval,
     };
 };
