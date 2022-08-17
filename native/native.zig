@@ -14,6 +14,8 @@ fn glfw_error_callback(err: c_int, description: ?[*:0]const u8) callconv(.C) voi
     std.debug.print("Glfw Error {}: {any}\n", .{ err, description });
 }
 
+const allocator = std.heap.c_allocator;
+
 pub fn main() !void {
     // Setup window
     _ = glfw.glfwSetErrorCallback(glfw_error_callback);
@@ -48,7 +50,7 @@ pub fn main() !void {
     // Setup Dear ImGui context
     imgui.CHECKVERSION();
     _ = imgui.CreateContext();
-    //const io = imgui.GetIO();
+    const io = imgui.GetIO();
     //io.ConfigFlags |= imgui.ConfigFlags.NavEnableKeyboard;     // Enable Keyboard Controls
     //io.ConfigFlags |= imgui.ConfigFlags.NavEnableGamepad;      // Enable Gamepad Controls
 
@@ -68,12 +70,10 @@ pub fn main() !void {
     // - Read 'docs/FONTS.txt' for more instructions and details.
     // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
     //io.Fonts.AddFontDefault();
-    //io.Fonts.AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0);
-    //io.Fonts.AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0);
-    //io.Fonts.AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0);
-    //io.Fonts.AddFontFromFileTTF("../../misc/fonts/ProggyTiny.ttf", 10.0);
-    //ImFont* font = io.Fonts.AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0, null, io.Fonts->GetGlyphRangesJapanese());
-    //IM_ASSERT(font != NULL);
+    const fira_code_ttf = try allocator.dupe(u8, @embedFile("./Fira_Code_v5.2/ttf/FiraCode-Regular.ttf"));
+    defer allocator.free(fira_code_ttf);
+    const fira_code = io.Fonts.?.AddFontFromMemoryTTF(fira_code_ttf.ptr, @intCast(c_int, fira_code_ttf.len), 16.0);
+    std.debug.assert(fira_code != null);
 
     // Our state
     var show_demo_window = true;
