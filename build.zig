@@ -87,14 +87,14 @@ pub fn addDeps(
 
 fn linkGlad(exe: *std.build.LibExeObjStep, target: std.zig.CrossTarget) void {
     _ = target;
-    exe.addIncludeDir("native/include/c_include");
-    exe.addCSourceFile("native/c_src/glad.c", &[_][]const u8{"-std=c99"});
+    exe.addIncludeDir("native/imgui_impl/");
+    exe.addCSourceFile("native/imgui_impl/glad.c", &[_][]const u8{"-std=c99"});
     //exe.linkSystemLibrary("opengl");
 }
 
 fn linkGlfw(exe: *std.build.LibExeObjStep, target: std.zig.CrossTarget) void {
     if (target.isWindows()) {
-        exe.addObjectFile(if (target.getAbi() == .msvc) "native/lib/win/glfw3.lib" else "native/lib/win/libglfw3.a");
+        exe.addObjectFile(if (target.getAbi() == .msvc) "native/imgui_impl/glfw3.lib" else "native/imgui_impl/libglfw3.a");
         exe.linkSystemLibrary("gdi32");
         exe.linkSystemLibrary("shell32");
     } else {

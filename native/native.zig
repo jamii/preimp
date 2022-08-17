@@ -3,10 +3,10 @@ const std = @import("std");
 const preimp = @import("../lib/preimp.zig");
 const u = preimp.util;
 const imgui = @import("imgui");
-const impl_glfw = @import("./imgui_impl_glfw.zig");
-const impl_gl3 = @import("./imgui_impl_opengl3.zig");
-const glfw = @import("./include/glfw.zig");
-const gl = @import("./include/gl.zig");
+const impl_glfw = @import("./imgui_impl/imgui_impl_glfw.zig");
+const impl_gl3 = @import("./imgui_impl/imgui_impl_opengl3.zig");
+const glfw = @import("./imgui_impl/glfw.zig");
+const gl = @import("./imgui_impl/gl.zig");
 
 const is_darwin = builtin.os.tag.isDarwin();
 

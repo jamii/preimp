@@ -31,7 +31,7 @@
 
 const std = @import("std");
 const imgui = @import("imgui");
-const gl = @import("include/gl.zig");
+const gl = @import("./gl.zig");
 const builtin = @import("builtin");
 
 const assert = std.debug.assert;
@@ -193,7 +193,9 @@ fn SetupRenderState(draw_data: *imgui.DrawData, fb_width: c_int, fb_height: c_in
     var B = draw_data.DisplayPos.y + draw_data.DisplaySize.y;
     if (MAY_HAVE_CLIP_ORIGIN and !clip_origin_lower_left) {
         // swap top and bottom if origin is upper left
-        const tmp = T; T = B; B = tmp;
+        const tmp = T;
+        T = B;
+        B = tmp;
     }
     const ortho_projection = [4][4]f32{
         [4]f32{ 2.0 / (R - L), 0.0, 0.0, 0.0 },
@@ -323,7 +325,7 @@ pub fn RenderDrawData(draw_data: *imgui.DrawData) void {
                     gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, bd.IndexBufferSize, null, gl.GL_STREAM_DRAW);
                 }
                 gl.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, vtx_buffer_size, cmd_list.VtxBuffer.Data);
-                gl.glBufferSubData(gl.GL_ELEMENT_ARRAY_BUFFER, 0, idx_buffer_size, cmd_list.IdxBuffer.Data); 
+                gl.glBufferSubData(gl.GL_ELEMENT_ARRAY_BUFFER, 0, idx_buffer_size, cmd_list.IdxBuffer.Data);
             } else {
                 gl.glBufferData(gl.GL_ARRAY_BUFFER, vtx_buffer_size, cmd_list.VtxBuffer.Data, gl.GL_STREAM_DRAW);
                 gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, idx_buffer_size, cmd_list.IdxBuffer.Data, gl.GL_STREAM_DRAW);
@@ -455,7 +457,7 @@ fn CheckShader(handle: gl.GLuint, desc: []const u8) bool {
     gl.glGetShaderiv(handle, gl.GL_COMPILE_STATUS, &status);
     gl.glGetShaderiv(handle, gl.GL_INFO_LOG_LENGTH, &log_length);
     if (status == gl.GL_FALSE)
-        std.debug.print("ERROR: imgui_impl_opengl3.CreateDeviceObjects: failed to compile {s}! With GLSL: {s}\n", .{desc, std.mem.sliceTo(&bd.GlslVersionString, 0)});
+        std.debug.print("ERROR: imgui_impl_opengl3.CreateDeviceObjects: failed to compile {s}! With GLSL: {s}\n", .{ desc, std.mem.sliceTo(&bd.GlslVersionString, 0) });
     if (log_length > 1) {
         var buf: imgui.Vector(u8) = .{};
         defer buf.deinit();

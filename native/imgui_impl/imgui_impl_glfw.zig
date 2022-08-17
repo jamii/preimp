@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const imgui = @import("imgui");
-const glfw = @import("include/glfw.zig");
+const glfw = @import("glfw.zig");
 const assert = std.debug.assert;
 
 const GLFW_HEADER_VERSION = glfw.GLFW_VERSION_MAJOR * 1000 + glfw.GLFW_VERSION_MINOR * 100;
@@ -12,7 +12,7 @@ const GLFW_HAS_GET_KEY_NAME = (GLFW_HEADER_VERSION >= 3200); // 3.2+ glfwGetKeyN
 const IS_EMSCRIPTEN = false;
 
 // GLFW data
-const GlfwClientApi = enum (u32) {
+const GlfwClientApi = enum(u32) {
     Unknown,
     OpenGL,
     Vulkan,
@@ -24,7 +24,7 @@ const Data = extern struct {
     ClientApi: GlfwClientApi = .Unknown,
     Time: f64 = 0,
     MouseWindow: ?*glfw.GLFWwindow = null,
-    MouseCursors: [imgui.MouseCursor.COUNT]?*glfw.GLFWcursor = [_]?*glfw.GLFWcursor{ null } ** imgui.MouseCursor.COUNT,
+    MouseCursors: [imgui.MouseCursor.COUNT]?*glfw.GLFWcursor = [_]?*glfw.GLFWcursor{null} ** imgui.MouseCursor.COUNT,
     LastValidMousePos: imgui.Vec2 = .{ .x = 0, .y = 0 },
     InstalledCallbacks: bool = false,
 
@@ -225,10 +225,15 @@ fn TranslateUntranslatedKey(raw_key: i32, scancode: i32) i32 {
                 const char_names = "`-=[]\\,;\'./";
                 const char_keys = [_]u8{ glfw.GLFW_KEY_GRAVE_ACCENT, glfw.GLFW_KEY_MINUS, glfw.GLFW_KEY_EQUAL, glfw.GLFW_KEY_LEFT_BRACKET, glfw.GLFW_KEY_RIGHT_BRACKET, glfw.GLFW_KEY_BACKSLASH, glfw.GLFW_KEY_COMMA, glfw.GLFW_KEY_SEMICOLON, glfw.GLFW_KEY_APOSTROPHE, glfw.GLFW_KEY_PERIOD, glfw.GLFW_KEY_SLASH };
                 comptime assert(char_names.len == char_keys.len);
-                if (key_name[0] >= '0' and key_name[0] <= '9')      { return glfw.GLFW_KEY_0 + (key_name[0] - '0'); }
-                else if (key_name[0] >= 'A' and key_name[0] <= 'Z') { return glfw.GLFW_KEY_A + (key_name[0] - 'A'); }
-                else if (key_name[0] >= 'a' and key_name[0] <= 'z') { return glfw.GLFW_KEY_A + (key_name[0] - 'a'); }
-                else if (std.mem.indexOfScalar(u8, char_names, key_name[0])) |idx| { return char_keys[idx]; }
+                if (key_name[0] >= '0' and key_name[0] <= '9') {
+                    return glfw.GLFW_KEY_0 + (key_name[0] - '0');
+                } else if (key_name[0] >= 'A' and key_name[0] <= 'Z') {
+                    return glfw.GLFW_KEY_A + (key_name[0] - 'A');
+                } else if (key_name[0] >= 'a' and key_name[0] <= 'z') {
+                    return glfw.GLFW_KEY_A + (key_name[0] - 'a');
+                } else if (std.mem.indexOfScalar(u8, char_names, key_name[0])) |idx| {
+                    return char_keys[idx];
+                }
             }
         }
         // if (action == GLFW_PRESS) std.debug.print("key {} scancode {} name '{s}'\n", .{ key, scancode, key_name });
@@ -366,8 +371,8 @@ fn Init(window: *glfw.GLFWwindow, install_callbacks: bool, client_api: GlfwClien
 
     io.BackendPlatformUserData = bd;
     io.BackendPlatformName = "imgui_impl_glfw";
-    io.BackendFlags.HasMouseCursors = true;         // We can honor GetMouseCursor() values (optional)
-    io.BackendFlags.HasSetMousePos = true;          // We can honor io.WantSetMousePos requests (optional, rarely used)
+    io.BackendFlags.HasMouseCursors = true; // We can honor GetMouseCursor() values (optional)
+    io.BackendFlags.HasSetMousePos = true; // We can honor io.WantSetMousePos requests (optional, rarely used)
 
     io.SetClipboardTextFn = SetClipboardText;
     io.GetClipboardTextFn = GetClipboardText;
@@ -440,8 +445,7 @@ fn UpdateMouseData() void {
     const bd = GetBackendData().?;
     const io = imgui.GetIO();
 
-    const is_app_focused = if (IS_EMSCRIPTEN) true
-        else (glfw.glfwGetWindowAttrib(bd.Window.?, glfw.GLFW_FOCUSED) != 0);
+    const is_app_focused = if (IS_EMSCRIPTEN) true else (glfw.glfwGetWindowAttrib(bd.Window.?, glfw.GLFW_FOCUSED) != 0);
     if (is_app_focused) {
         // (Optional) Set OS mouse position from Dear ImGui if requested (rarely used, only when ImGuiConfigFlags_NavEnableSetMousePos is enabled by user)
         if (io.WantSetMousePos)
@@ -477,7 +481,9 @@ fn UpdateMouseCursor() void {
 }
 
 // Update gamepad inputs
-inline fn Saturate(v: f32) f32 { return if (v < 0) 0 else if (v > 1) 1 else v; }
+inline fn Saturate(v: f32) f32 {
+    return if (v < 0) 0 else if (v > 1) 1 else v;
+}
 
 fn UpdateGamepads() void {
     const io = imgui.GetIO();
@@ -487,30 +493,30 @@ fn UpdateGamepads() void {
     const InputKind = enum { Button, Analog };
     const Mapping = struct { kind: InputKind, key: imgui.Key, btn: u32, low: f32 = 0, high: f32 = 0 };
     const mappings = [_]Mapping{
-        .{ .kind = .Button, .key = .GamepadStart,       .btn = glfw.GLFW_GAMEPAD_BUTTON_START },
-        .{ .kind = .Button, .key = .GamepadBack,        .btn = glfw.GLFW_GAMEPAD_BUTTON_BACK },
-        .{ .kind = .Button, .key = .GamepadFaceDown,    .btn = glfw.GLFW_GAMEPAD_BUTTON_A },     // Xbox A, PS Cross
-        .{ .kind = .Button, .key = .GamepadFaceRight,   .btn = glfw.GLFW_GAMEPAD_BUTTON_B },     // Xbox B, PS Circle
-        .{ .kind = .Button, .key = .GamepadFaceLeft,    .btn = glfw.GLFW_GAMEPAD_BUTTON_X },     // Xbox X, PS Square
-        .{ .kind = .Button, .key = .GamepadFaceUp,      .btn = glfw.GLFW_GAMEPAD_BUTTON_Y },     // Xbox Y, PS Triangle
-        .{ .kind = .Button, .key = .GamepadDpadLeft,    .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_LEFT },
-        .{ .kind = .Button, .key = .GamepadDpadRight,   .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_RIGHT },
-        .{ .kind = .Button, .key = .GamepadDpadUp,      .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_UP },
-        .{ .kind = .Button, .key = .GamepadDpadDown,    .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_DOWN },
-        .{ .kind = .Button, .key = .GamepadL1,          .btn = glfw.GLFW_GAMEPAD_BUTTON_LEFT_BUMPER },
-        .{ .kind = .Button, .key = .GamepadR1,          .btn = glfw.GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER },
-        .{ .kind = .Analog, .key = .GamepadL2,          .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_TRIGGER,  .low = -0.75, .high =  1.0 },
-        .{ .kind = .Analog, .key = .GamepadR2,          .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER, .low = -0.75, .high =  1.0 },
-        .{ .kind = .Button, .key = .GamepadL3,          .btn = glfw.GLFW_GAMEPAD_BUTTON_LEFT_THUMB },
-        .{ .kind = .Button, .key = .GamepadR3,          .btn = glfw.GLFW_GAMEPAD_BUTTON_RIGHT_THUMB },
-        .{ .kind = .Analog, .key = .GamepadLStickLeft,  .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_X,        .low = -0.25, .high = -1.0 },
-        .{ .kind = .Analog, .key = .GamepadLStickRight, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_X,        .low =  0.25, .high =  1.0 },
-        .{ .kind = .Analog, .key = .GamepadLStickUp,    .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_Y,        .low = -0.25, .high = -1.0 },
-        .{ .kind = .Analog, .key = .GamepadLStickDown,  .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_Y,        .low =  0.25, .high =  1.0 },
-        .{ .kind = .Analog, .key = .GamepadRStickLeft,  .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_X,       .low = -0.25, .high = -1.0 },
-        .{ .kind = .Analog, .key = .GamepadRStickRight, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_X,       .low =  0.25, .high =  1.0 },
-        .{ .kind = .Analog, .key = .GamepadRStickUp,    .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_Y,       .low = -0.25, .high = -1.0 },
-        .{ .kind = .Analog, .key = .GamepadRStickDown,  .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_Y,       .low =  0.25, .high =  1.0 },
+        .{ .kind = .Button, .key = .GamepadStart, .btn = glfw.GLFW_GAMEPAD_BUTTON_START },
+        .{ .kind = .Button, .key = .GamepadBack, .btn = glfw.GLFW_GAMEPAD_BUTTON_BACK },
+        .{ .kind = .Button, .key = .GamepadFaceDown, .btn = glfw.GLFW_GAMEPAD_BUTTON_A }, // Xbox A, PS Cross
+        .{ .kind = .Button, .key = .GamepadFaceRight, .btn = glfw.GLFW_GAMEPAD_BUTTON_B }, // Xbox B, PS Circle
+        .{ .kind = .Button, .key = .GamepadFaceLeft, .btn = glfw.GLFW_GAMEPAD_BUTTON_X }, // Xbox X, PS Square
+        .{ .kind = .Button, .key = .GamepadFaceUp, .btn = glfw.GLFW_GAMEPAD_BUTTON_Y }, // Xbox Y, PS Triangle
+        .{ .kind = .Button, .key = .GamepadDpadLeft, .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_LEFT },
+        .{ .kind = .Button, .key = .GamepadDpadRight, .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_RIGHT },
+        .{ .kind = .Button, .key = .GamepadDpadUp, .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_UP },
+        .{ .kind = .Button, .key = .GamepadDpadDown, .btn = glfw.GLFW_GAMEPAD_BUTTON_DPAD_DOWN },
+        .{ .kind = .Button, .key = .GamepadL1, .btn = glfw.GLFW_GAMEPAD_BUTTON_LEFT_BUMPER },
+        .{ .kind = .Button, .key = .GamepadR1, .btn = glfw.GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER },
+        .{ .kind = .Analog, .key = .GamepadL2, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_TRIGGER, .low = -0.75, .high = 1.0 },
+        .{ .kind = .Analog, .key = .GamepadR2, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER, .low = -0.75, .high = 1.0 },
+        .{ .kind = .Button, .key = .GamepadL3, .btn = glfw.GLFW_GAMEPAD_BUTTON_LEFT_THUMB },
+        .{ .kind = .Button, .key = .GamepadR3, .btn = glfw.GLFW_GAMEPAD_BUTTON_RIGHT_THUMB },
+        .{ .kind = .Analog, .key = .GamepadLStickLeft, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_X, .low = -0.25, .high = -1.0 },
+        .{ .kind = .Analog, .key = .GamepadLStickRight, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_X, .low = 0.25, .high = 1.0 },
+        .{ .kind = .Analog, .key = .GamepadLStickUp, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_Y, .low = -0.25, .high = -1.0 },
+        .{ .kind = .Analog, .key = .GamepadLStickDown, .btn = glfw.GLFW_GAMEPAD_AXIS_LEFT_Y, .low = 0.25, .high = 1.0 },
+        .{ .kind = .Analog, .key = .GamepadRStickLeft, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_X, .low = -0.25, .high = -1.0 },
+        .{ .kind = .Analog, .key = .GamepadRStickRight, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_X, .low = 0.25, .high = 1.0 },
+        .{ .kind = .Analog, .key = .GamepadRStickUp, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_Y, .low = -0.25, .high = -1.0 },
+        .{ .kind = .Analog, .key = .GamepadRStickDown, .btn = glfw.GLFW_GAMEPAD_AXIS_RIGHT_Y, .low = 0.25, .high = 1.0 },
     };
 
     io.BackendFlags.HasGamepad = false;
@@ -533,7 +539,7 @@ fn UpdateGamepads() void {
         const buttons = glfw.glfwGetJoystickButtons(glfw.GLFW_JOYSTICK_1, &buttons_count);
         if (axes_count == 0 or buttons_count == 0)
             return;
-        
+
         inline for (mappings) |m| switch (m.kind) {
             .Button => io.AddKeyEvent(m.key, m.btn > buttons_count and buttons.?[m.btn] != 0),
             .Analog => {
