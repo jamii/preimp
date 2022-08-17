@@ -1,9 +1,9 @@
 const std = @import("std");
+const imgui = @import("deps/zig-imgui/zig-imgui/imgui_build.zig");
 
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     var target = b.standardTargetOptions(.{});
-    target.setGnuLibCVersion(2, 28, 0);
 
     //const run = addBin(b, mode, target, "run", "Evaluate an imp file", "./bin/run.zig");
     //run.run.addArgs(b.args orelse &.{});
@@ -34,6 +34,11 @@ pub fn build(b: *std.build.Builder) !void {
 
     const wasm_step = b.step("wasm", "Build wasm (zig-out/lib/preimp.wasm)");
     wasm_step.dependOn(&wasm.step);
+
+    const native = addBin(b, mode, target, "native_gui", "Run the native gui", "./native/native.zig");
+    imgui.link(native.bin);
+    linkGlfw(native.bin, target);
+    linkGlad(native.bin, target);
 }
 
 fn addBin(
@@ -78,4 +83,21 @@ pub fn addDeps(
     bin.linkLibC();
     //bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
     //bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
+}
+
+fn linkGlad(exe: *std.build.LibExeObjStep, target: std.zig.CrossTarget) void {
+    _ = target;
+    exe.addIncludeDir("native/include/c_include");
+    exe.addCSourceFile("native/c_src/glad.c", &[_][]const u8{"-std=c99"});
+    //exe.linkSystemLibrary("opengl");
+}
+
+fn linkGlfw(exe: *std.build.LibExeObjStep, target: std.zig.CrossTarget) void {
+    if (target.isWindows()) {
+        exe.addObjectFile(if (target.getAbi() == .msvc) "native/lib/win/glfw3.lib" else "native/lib/win/libglfw3.a");
+        exe.linkSystemLibrary("gdi32");
+        exe.linkSystemLibrary("shell32");
+    } else {
+        exe.linkSystemLibrary("glfw");
+    }
 }

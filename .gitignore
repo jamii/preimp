@@ -6,3 +6,4 @@ preimp.db
 secret.nix
 zig-cache
 zig-out
+imgui.ini

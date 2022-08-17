@@ -39,6 +39,7 @@ pkgs.mkShell rec {
         #pkgs.jre
         #pkgs.nixopsUnstable
         zig
+        pkgs.glfw
     ];
     #shellHook = ''
     #    export NIX_PATH=${pkgs.path}:nixpkgs=${pkgs.path}:.
