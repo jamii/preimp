@@ -2,7 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const preimp = @import("../lib/preimp.zig");
 const u = preimp.util;
-const imgui = @import("imgui");
+const ig = @import("imgui");
 const impl_glfw = @import("./imgui_impl/imgui_impl_glfw.zig");
 const impl_gl3 = @import("./imgui_impl/imgui_impl_opengl3.zig");
 const glfw = @import("./imgui_impl/glfw.zig");
@@ -34,8 +34,6 @@ pub fn main() !void {
         // GL 3.0 + GLSL 130
         glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfw.glfwWindowHint(glfw.GLFW_CONTEXT_VERSION_MINOR, 0);
-        //glfw.glfwWindowHint(glfw.GLFW_OPENGL_PROFILE, glfw.GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-        //glfw.glfwWindowHint(glfw.GLFW_OPENGL_FORWARD_COMPAT, gl.GL_TRUE);            // 3.0+ only
     }
 
     // Create window with graphics context
@@ -48,15 +46,12 @@ pub fn main() !void {
         return error.GladLoadGLFailed;
 
     // Setup Dear ImGui context
-    imgui.CHECKVERSION();
-    _ = imgui.CreateContext();
-    const io = imgui.GetIO();
-    //io.ConfigFlags |= imgui.ConfigFlags.NavEnableKeyboard;     // Enable Keyboard Controls
-    //io.ConfigFlags |= imgui.ConfigFlags.NavEnableGamepad;      // Enable Gamepad Controls
+    ig.CHECKVERSION();
+    _ = ig.CreateContext();
+    const io = ig.GetIO();
 
     // Setup Dear ImGui style
-    imgui.StyleColorsDark();
-    //imgui.StyleColorsClassic();
+    ig.StyleColorsDark();
 
     // Setup Platform/Renderer bindings
     _ = impl_glfw.InitForOpenGL(window, true);
@@ -68,61 +63,46 @@ pub fn main() !void {
     const fira_code = io.Fonts.?.AddFontFromMemoryTTF(fira_code_ttf.ptr, @intCast(c_int, fira_code_ttf.len), 16.0);
     std.debug.assert(fira_code != null);
 
-    // Our state
-    var show_demo_window = true;
-    var show_another_window = false;
-    var clear_color = imgui.Vec4{ .x = 0.45, .y = 0.55, .z = 0.60, .w = 1.00 };
-    var slider_value: f32 = 0;
-    var counter: i32 = 0;
-
     // Main loop
+    var show_window = true;
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
 
         // Start the Dear ImGui frame
         impl_gl3.NewFrame();
         impl_glfw.NewFrame();
-        imgui.NewFrame();
+        ig.NewFrame();
 
-        // 1. Show the big demo window (Most of the sample code is in imgui.ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-        if (show_demo_window)
-            imgui.ShowDemoWindowExt(&show_demo_window);
+        // Size main window
+        const viewport = ig.GetMainViewport().?;
+        ig.SetNextWindowPos(viewport.Pos);
+        ig.SetNextWindowSize(viewport.Size);
 
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
-        {
-            _ = imgui.Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
+        // Main loop
+        if (show_window) {
+            _ = ig.BeginExt(
+                "The window",
+                &show_window,
+                (ig.WindowFlags{
+                    .NoBackground = true,
+                    .AlwaysAutoResize = true,
+                    .NoSavedSettings = true,
+                    .NoFocusOnAppearing = true,
+                }).with(ig.WindowFlags.NoDecoration).with(ig.WindowFlags.NoNav),
+            );
 
-            imgui.Text("This is some useful text."); // Display some text (you can use a format strings too)
-            _ = imgui.Checkbox("Demo Window", &show_demo_window); // Edit bools storing our window open/close state
-            _ = imgui.Checkbox("Another Window", &show_another_window);
+            ig.Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0 / ig.GetIO().Framerate, ig.GetIO().Framerate);
 
-            _ = imgui.SliderFloat("float", &slider_value, 0.0, 1.0); // Edit 1 float using a slider from 0.0 to 1.0
-            _ = imgui.ColorEdit3("clear color", @ptrCast(*[3]f32, &clear_color)); // Edit 3 floats representing a color
-
-            if (imgui.Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
-                counter += 1;
-            imgui.SameLine();
-            imgui.Text("counter = %d", counter);
-
-            imgui.Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0 / imgui.GetIO().Framerate, imgui.GetIO().Framerate);
-            imgui.End();
-        }
-
-        // 3. Show another simple window.
-        if (show_another_window) {
-            _ = imgui.BeginExt("Another Window", &show_another_window, .{});
-            imgui.Text("Hello from another window!");
-            if (imgui.Button("Close Me"))
-                show_another_window = false;
-            imgui.End();
+            ig.End();
         }
 
         // Rendering
-        imgui.Render();
+        ig.Render();
         var display_w: c_int = 0;
         var display_h: c_int = 0;
         glfw.glfwGetFramebufferSize(window, &display_w, &display_h);
         gl.glViewport(0, 0, display_w, display_h);
+        const clear_color = ig.Vec4{ .x = 0.45, .y = 0.55, .z = 0.60, .w = 1.00 };
         gl.glClearColor(
             clear_color.x * clear_color.w,
             clear_color.y * clear_color.w,
@@ -130,7 +110,7 @@ pub fn main() !void {
             clear_color.w,
         );
         gl.glClear(gl.GL_COLOR_BUFFER_BIT);
-        impl_gl3.RenderDrawData(imgui.GetDrawData());
+        impl_gl3.RenderDrawData(ig.GetDrawData());
 
         glfw.glfwSwapBuffers(window);
     }
@@ -138,7 +118,7 @@ pub fn main() !void {
     // Cleanup
     impl_gl3.Shutdown();
     impl_glfw.Shutdown();
-    imgui.DestroyContext();
+    ig.DestroyContext();
 
     glfw.glfwDestroyWindow(window);
     glfw.glfwTerminate();

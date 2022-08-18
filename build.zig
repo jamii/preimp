@@ -35,10 +35,11 @@ pub fn build(b: *std.build.Builder) !void {
     const wasm_step = b.step("wasm", "Build wasm (zig-out/lib/preimp.wasm)");
     wasm_step.dependOn(&wasm.step);
 
-    const native = addBin(b, mode, target, "native_gui", "Run the native gui", "./native/native.zig");
+    const native = addBin(b, mode, target, "run_native", "Run the native gui", "./native/native.zig");
     imgui.link(native.bin);
     linkGlfw(native.bin, target);
     linkGlad(native.bin, target);
+    native.bin.install();
 }
 
 fn addBin(
