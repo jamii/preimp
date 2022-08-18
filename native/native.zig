@@ -63,8 +63,14 @@ pub fn main() !void {
     const fira_code = io.Fonts.?.AddFontFromMemoryTTF(fira_code_ttf.ptr, @intCast(c_int, fira_code_ttf.len), 16.0);
     std.debug.assert(fira_code != null);
 
-    // Main loop
     var show_window = true;
+    var state = State{
+        .source = try allocator.dupeZ(u8, "nil"),
+        .arena = u.ArenaAllocator.init(allocator),
+        .input = preimp.Value.fromInner(.nil),
+    };
+
+    // Main loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
 
@@ -78,7 +84,6 @@ pub fn main() !void {
         ig.SetNextWindowPos(viewport.Pos);
         ig.SetNextWindowSize(viewport.Size);
 
-        // Main loop
         if (show_window) {
             _ = ig.BeginExt(
                 "The window",
@@ -90,6 +95,8 @@ pub fn main() !void {
                     .NoFocusOnAppearing = true,
                 }).with(ig.WindowFlags.NoDecoration).with(ig.WindowFlags.NoNav),
             );
+
+            try draw(&state);
 
             ig.Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0 / ig.GetIO().Framerate, ig.GetIO().Framerate);
 
@@ -119,7 +126,74 @@ pub fn main() !void {
     impl_gl3.Shutdown();
     impl_glfw.Shutdown();
     ig.DestroyContext();
-
     glfw.glfwDestroyWindow(window);
     glfw.glfwTerminate();
+}
+
+const State = struct {
+    source: []u8,
+    arena: u.ArenaAllocator,
+    // remaining state is arena allocated
+    input: preimp.Value,
+
+    fn deinit(self: *State) void {
+        allocator.free(self.source);
+        self.arena.deinit();
+    }
+};
+
+fn draw(state: *State) !void {
+    var num_newlines: usize = 0;
+    {
+        const source = std.mem.sliceTo(state.source, 0);
+        for (source) |char| {
+            if (char == '\n') {
+                num_newlines += 1;
+            }
+        }
+    }
+
+    const MySource = @TypeOf(state.source);
+    const source_changed = ig.InputTextMultilineExt(
+        "##source",
+        state.source.ptr,
+        state.source.len + 1,
+        .{
+            .x = 0,
+            .y = @intToFloat(f32, num_newlines + 1) * ig.GetTextLineHeight() +
+                2 * ig.GetStyle().?.FramePadding.y +
+                1,
+        },
+        .{
+            .CallbackResize = true,
+        },
+        struct {
+            export fn resize(data: [*c]ig.InputTextCallbackData) c_int {
+                const my_source = @ptrCast(*MySource, @alignCast(@alignOf(MySource), data.*.UserData));
+                if (data.*.EventFlag.CallbackResize) {
+                    my_source.* = allocator.realloc(my_source.*, @intCast(usize, data.*.BufSize)) catch unreachable;
+                    data.*.Buf = my_source.ptr;
+                    return 0;
+                } else
+                // We didn't ask for any other events
+                unreachable;
+            }
+        }.resize,
+        @ptrCast(*anyopaque, &state.source),
+    );
+    if (source_changed) {
+        state.arena.deinit();
+        state.arena = u.ArenaAllocator.init(allocator);
+        const source = try state.arena.allocator().dupeZ(u8, state.source);
+        var parser = try preimp.Parser.init(state.arena.allocator(), source);
+        const exprs = try parser.parseExprs(null, .eof);
+        var evaluator = preimp.Evaluator.init(state.arena.allocator());
+        var origin = u.ArrayList(preimp.Value).init(state.arena.allocator());
+        state.input = try evaluator.evalExprs(exprs, &origin);
+    }
+    draw_value(state.input);
+}
+
+fn draw_value(value: preimp.Value) void {
+    _ = value;
 }
