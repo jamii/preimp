@@ -12,15 +12,14 @@ pub fn main() anyerror!void {
 
     var args = std.process.args();
     // arg 0 is executable
-    _ = try args.next(allocator).?;
-    while (args.next(allocator)) |arg| {
-        var rewritten_tests = u.ArrayList(u8).init(allocator);
-        const filename = try arg;
-
-        if (std.mem.eql(u8, filename, "--rewrite-tests")) {
+    _ = args.next().?;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--rewrite-tests")) {
             rewrite_tests = true;
             continue;
         }
+
+        const filename = arg;
 
         // TODO When using `--test-cmd` to run with rr, `zig run` also passes the location of the zig binary as an extra argument. I don't know how to turn this off.
         if (std.mem.endsWith(u8, filename, "zig")) continue;
@@ -28,7 +27,7 @@ pub fn main() anyerror!void {
         var file = if (std.mem.eql(u8, filename, "-"))
             std.io.getStdIn()
         else
-            try std.fs.cwd().openFile(filename, .{ .read = true, .write = true });
+            try std.fs.cwd().openFile(filename, .{ .mode = .read_write });
 
         // TODO can't use readFileAlloc on stdin
         var cases = u.ArrayList(u8).init(allocator);
@@ -44,6 +43,7 @@ pub fn main() anyerror!void {
             }
         }
 
+        var rewritten_tests = u.ArrayList(u8).init(allocator);
         var cases_iter = std.mem.split(u8, cases.items, "\n\n");
         while (cases_iter.next()) |case| {
             var case_iter = std.mem.split(u8, case, "---");
