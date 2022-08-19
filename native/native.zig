@@ -52,7 +52,14 @@ pub fn main() !void {
     const io = ig.GetIO();
 
     // Setup Dear ImGui style
-    ig.StyleColorsDark();
+    const style = ig.GetStyle().?;
+    style.FrameBorderSize = 2;
+    style.Colors[@enumToInt(ig.Col.Text)] = ig.Color.initHSVA(0, 0.0, 0.9, 1.0).Value;
+    style.Colors[@enumToInt(ig.Col.Border)] = ig.Color.initHSVA(0, 0.0, 0.9, 1.0).Value;
+    style.Colors[@enumToInt(ig.Col.TextDisabled)] = ig.Color.initHSVA(0, 0.0, 0.6, 1.0).Value;
+    style.Colors[@enumToInt(ig.Col.WindowBg)] = ig.Color.initHSVA(0, 0, 0.2, 1.0).Value;
+    style.Colors[@enumToInt(ig.Col.ChildBg)] = ig.Color.initHSVA(0, 0, 0.2, 1.0).Value;
+    style.Colors[@enumToInt(ig.Col.FrameBg)] = ig.Color.initHSVA(0, 0, 0.2, 1.0).Value;
 
     // Setup Platform/Renderer bindings
     _ = impl_glfw.InitForOpenGL(window, true);
@@ -66,11 +73,12 @@ pub fn main() !void {
 
     var show_window = true;
     var state = State{
-        .source = try allocator.dupeZ(u8, "nil"),
+        .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
         .arena = u.ArenaAllocator.init(allocator),
-        .input = &[1]preimp.Value{preimp.Value.fromInner(.nil)},
+        .input = &.{},
         .output = preimp.Value.fromInner(.nil),
     };
+    try refresh(&state);
 
     // Main loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -112,7 +120,7 @@ pub fn main() !void {
         var display_h: c_int = 0;
         glfw.glfwGetFramebufferSize(window, &display_w, &display_h);
         gl.glViewport(0, 0, display_w, display_h);
-        const clear_color = ig.Vec4{ .x = 0.45, .y = 0.55, .z = 0.60, .w = 1.00 };
+        const clear_color = style.Colors[@enumToInt(ig.Col.WindowBg)];
         gl.glClearColor(
             clear_color.x * clear_color.w,
             clear_color.y * clear_color.w,
@@ -185,16 +193,8 @@ fn draw(state: *State) !void {
         }.resize,
         @ptrCast(*anyopaque, &state.source),
     );
-    if (source_changed) {
-        state.arena.deinit();
-        state.arena = u.ArenaAllocator.init(allocator);
-        const source = try state.arena.allocator().dupeZ(u8, state.source);
-        var parser = try preimp.Parser.init(state.arena.allocator(), source);
-        state.input = try parser.parseExprs(null, .eof);
-        var evaluator = preimp.Evaluator.init(state.arena.allocator());
-        var origin = u.ArrayList(preimp.Value).init(state.arena.allocator());
-        state.output = try evaluator.evalExprs(state.input, &origin);
-    }
+    if (source_changed)
+        try refresh(state);
     ig.NewLine();
     for (state.input) |expr|
         try draw_value(state, expr);
@@ -202,8 +202,20 @@ fn draw(state: *State) !void {
     try draw_value(state, state.output);
 }
 
-// TODO want to align closing paren with outer edge of content
+fn refresh(state: *State) !void {
+    state.arena.deinit();
+    state.arena = u.ArenaAllocator.init(allocator);
+    const source = try state.arena.allocator().dupeZ(u8, state.source);
+    var parser = try preimp.Parser.init(state.arena.allocator(), source);
+    state.input = try parser.parseExprs(null, .eof);
+    var evaluator = preimp.Evaluator.init(state.arena.allocator());
+    var origin = u.ArrayList(preimp.Value).init(state.arena.allocator());
+    state.output = try evaluator.evalExprs(state.input, &origin);
+}
+
 fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
+    ig.BeginGroup();
+    defer ig.EndGroup();
     switch (value.inner) {
         .nil => ig.Text("nil"),
         .@"true" => ig.Text("true"),
@@ -218,63 +230,98 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             ig.Text(text);
         },
         .list => |list| {
-            ig.Text("(");
-            ig.SameLine();
-            ig.BeginGroup();
+            OpenBrace("(");
+            defer CloseBrace(")");
             for (list) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
+                defer ig.PopID();
                 try draw_value(state, elem);
-                ig.PopID();
             }
-            ig.SameLine();
-            const pos_group_end = ig.GetCursorPos();
-            ig.EndGroup();
-            ig.SameLine();
-            const pos_next_line = ig.GetCursorPos();
-            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
-            ig.Text(")");
         },
         .vec => |vec| {
-            ig.Text("[");
-            ig.SameLine();
-            ig.BeginGroup();
+            OpenBrace("[");
+            defer CloseBrace("]");
             for (vec) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
+                defer ig.PopID();
                 try draw_value(state, elem);
-                ig.PopID();
             }
-            ig.SameLine();
-            const pos_group_end = ig.GetCursorPos();
-            ig.EndGroup();
-            ig.SameLine();
-            const pos_next_line = ig.GetCursorPos();
-            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
-            ig.Text("]");
         },
         .map => |map| {
-            ig.Text("{");
-            ig.SameLine();
-            ig.BeginGroup();
+            OpenBrace("{");
+            defer CloseBrace("}");
             for (map) |key_val, i| {
                 if (i != 0)
                     ig.NewLine();
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
-                _ = ig.PushID_Str("key");
-                try draw_value(state, key_val.key);
-                ig.PopID();
-                _ = ig.PushID_Str("val");
-                try draw_value(state, key_val.val);
-                ig.PopID();
-                ig.PopID();
+                defer ig.PopID();
+                {
+                    _ = ig.PushID_Str("key");
+                    defer ig.PopID();
+                    try draw_value(state, key_val.key);
+                }
+                {
+                    _ = ig.PushID_Str("val");
+                    defer ig.PopID();
+                    try draw_value(state, key_val.val);
+                }
             }
-            ig.SameLine();
-            const pos_group_end = ig.GetCursorPos();
-            ig.EndGroup();
-            ig.SameLine();
-            const pos_next_line = ig.GetCursorPos();
-            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
-            ig.Text("}");
         },
-        else => ig.Text("!!!"),
+        .tagged => |tagged| {
+            OpenBrace("#");
+            defer CloseBrace("");
+            {
+                _ = ig.PushID_Str("key");
+                defer ig.PopID();
+                try draw_value(state, tagged.key.*);
+            }
+            {
+                _ = ig.PushID_Str("val");
+                defer ig.PopID();
+                OpenBrace(" ");
+                defer CloseBrace("");
+                try draw_value(state, tagged.val.*);
+            }
+        },
+        .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
+        .fun => ig.Text("<fn>"),
+        .actions => |actions| {
+            OpenBrace("(");
+            defer CloseBrace(")");
+            ig.Text("do");
+            for (actions) |action, action_ix| {
+                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{action_ix}));
+                defer ig.PopID();
+                OpenBrace("(");
+                defer CloseBrace(")");
+                ig.Text("put-at!");
+                {
+                    OpenBrace("[");
+                    defer CloseBrace("]");
+                    for (action.origin) |origin_elem, origin_elem_ix| {
+                        _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{origin_elem_ix}));
+                        defer ig.PopID();
+                        try draw_value(state, origin_elem);
+                    }
+                }
+                try draw_value(state, action.new);
+            }
+        },
     }
+}
+
+fn OpenBrace(label: [:0]const u8) void {
+    ig.Text(label);
+    ig.SameLine();
+    ig.SetCursorPosX(ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x);
+    ig.BeginGroup();
+}
+
+fn CloseBrace(label: [:0]const u8) void {
+    ig.EndGroup();
+    const y = ig.GetCursorPosY();
+    ig.SameLine();
+    ig.SetCursorPosX(ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x);
+    ig.SetCursorPosY(y - ig.GetTextLineHeightWithSpacing());
+    ig.Text(label);
 }
