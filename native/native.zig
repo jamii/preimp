@@ -37,7 +37,8 @@ pub fn main() !void {
     }
 
     // Create window with graphics context
-    const window = glfw.glfwCreateWindow(1280, 720, "Dear ImGui GLFW+OpenGL3 example", null, null) orelse return error.GlfwCreateWindowFailed;
+    const window = glfw.glfwCreateWindow(1280, 720, "preimp", null, null) orelse
+        return error.GlfwCreateWindowFailed;
     glfw.glfwMakeContextCurrent(window);
     glfw.glfwSwapInterval(1); // Enable vsync
 
@@ -217,60 +218,71 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             ig.Text(text);
         },
         .list => |list| {
-            if (ig.BeginTableExt("list", 3, .{
-                //.SizingStretchSame = true
-            }, .{ .x = 0, .y = 0 }, 0)) {
-                for (list) |elem, i| {
-                    ig.TableNextRow();
-                    if (i == 0) {
-                        _ = ig.TableSetColumnIndex(0);
-                        ig.Text("(");
-                    }
-                    _ = ig.TableSetColumnIndex(1);
-                    try draw_value(state, elem);
-                }
-                _ = ig.TableSetColumnIndex(2);
-                ig.Text(")");
-                ig.EndTable();
+            ig.Text("(");
+            ig.TreePush_Str("##list");
+            ig.BeginGroup();
+            ig.SameLine();
+            for (list) |elem, i| {
+                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
+                try draw_value(state, elem);
+                ig.PopID();
             }
+            ig.SameLine();
+            const pos_group_end = ig.GetCursorPos();
+            ig.EndGroup();
+            ig.SameLine();
+            const pos_next_line = ig.GetCursorPos();
+            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
+            ig.Text(")");
+            //ig.SetCursorPos(pos_next_line);
+            ig.TreePop();
         },
         .vec => |vec| {
-            if (ig.BeginTableExt("vec", 3, .{
-                //.SizingStretchSame = true
-            }, .{ .x = 0, .y = 0 }, 0)) {
-                for (vec) |elem, i| {
-                    ig.TableNextRow();
-                    if (i == 0) {
-                        _ = ig.TableSetColumnIndex(0);
-                        ig.Text("[");
-                    }
-                    _ = ig.TableSetColumnIndex(1);
-                    try draw_value(state, elem);
-                }
-                _ = ig.TableSetColumnIndex(2);
-                ig.Text("]");
-                ig.EndTable();
+            ig.Text("[");
+            ig.TreePush_Str("##vec");
+            ig.BeginGroup();
+            ig.SameLine();
+            for (vec) |elem, i| {
+                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
+                try draw_value(state, elem);
+                ig.PopID();
             }
+            ig.SameLine();
+            const pos_group_end = ig.GetCursorPos();
+            ig.EndGroup();
+            ig.SameLine();
+            const pos_next_line = ig.GetCursorPos();
+            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
+            ig.Text("]");
+            //ig.SetCursorPos(pos_next_line);
+            ig.TreePop();
         },
         .map => |map| {
-            if (ig.BeginTableExt("map", 4, .{
-                //.SizingStretchSame = true
-            }, .{ .x = 0, .y = 0 }, 0)) {
-                for (map) |key_val, i| {
-                    ig.TableNextRow();
-                    if (i == 0) {
-                        _ = ig.TableSetColumnIndex(0);
-                        ig.Text("{");
-                    }
-                    _ = ig.TableSetColumnIndex(1);
-                    try draw_value(state, key_val.key);
-                    _ = ig.TableSetColumnIndex(2);
-                    try draw_value(state, key_val.val);
-                }
-                _ = ig.TableSetColumnIndex(3);
-                ig.Text("}");
-                ig.EndTable();
+            ig.Text("{");
+            ig.TreePush_Str("##map");
+            ig.BeginGroup();
+            ig.SameLine();
+            for (map) |key_val, i| {
+                if (i != 0)
+                    ig.NewLine();
+                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
+                _ = ig.PushID_Str("key");
+                try draw_value(state, key_val.key);
+                ig.PopID();
+                _ = ig.PushID_Str("val");
+                try draw_value(state, key_val.val);
+                ig.PopID();
+                ig.PopID();
             }
+            ig.SameLine();
+            const pos_group_end = ig.GetCursorPos();
+            ig.EndGroup();
+            ig.SameLine();
+            const pos_next_line = ig.GetCursorPos();
+            ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
+            ig.Text("}");
+            //ig.SetCursorPos(pos_next_line);
+            ig.TreePop();
         },
         else => ig.Text("!!!"),
     }
