@@ -67,7 +67,8 @@ pub fn main() !void {
     var state = State{
         .source = try allocator.dupeZ(u8, "nil"),
         .arena = u.ArenaAllocator.init(allocator),
-        .input = preimp.Value.fromInner(.nil),
+        .input = &[1]preimp.Value{preimp.Value.fromInner(.nil)},
+        .output = preimp.Value.fromInner(.nil),
     };
 
     // Main loop
@@ -98,6 +99,7 @@ pub fn main() !void {
 
             try draw(&state);
 
+            ig.NewLine();
             ig.Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0 / ig.GetIO().Framerate, ig.GetIO().Framerate);
 
             ig.End();
@@ -134,7 +136,8 @@ const State = struct {
     source: []u8,
     arena: u.ArenaAllocator,
     // remaining state is arena allocated
-    input: preimp.Value,
+    input: []preimp.Value,
+    output: preimp.Value,
 
     fn deinit(self: *State) void {
         allocator.free(self.source);
@@ -143,12 +146,12 @@ const State = struct {
 };
 
 fn draw(state: *State) !void {
-    var num_newlines: usize = 0;
+    var num_lines: usize = 1;
     {
         const source = std.mem.sliceTo(state.source, 0);
         for (source) |char| {
             if (char == '\n') {
-                num_newlines += 1;
+                num_lines += 1;
             }
         }
     }
@@ -160,7 +163,7 @@ fn draw(state: *State) !void {
         state.source.len + 1,
         .{
             .x = 0,
-            .y = @intToFloat(f32, num_newlines + 1) * ig.GetTextLineHeight() +
+            .y = @intToFloat(f32, num_lines) * ig.GetTextLineHeight() +
                 2 * ig.GetStyle().?.FramePadding.y +
                 1,
         },
@@ -186,14 +189,89 @@ fn draw(state: *State) !void {
         state.arena = u.ArenaAllocator.init(allocator);
         const source = try state.arena.allocator().dupeZ(u8, state.source);
         var parser = try preimp.Parser.init(state.arena.allocator(), source);
-        const exprs = try parser.parseExprs(null, .eof);
+        state.input = try parser.parseExprs(null, .eof);
         var evaluator = preimp.Evaluator.init(state.arena.allocator());
         var origin = u.ArrayList(preimp.Value).init(state.arena.allocator());
-        state.input = try evaluator.evalExprs(exprs, &origin);
+        state.output = try evaluator.evalExprs(state.input, &origin);
     }
-    draw_value(state.input);
+    ig.NewLine();
+    for (state.input) |expr|
+        try draw_value(state, expr);
+    ig.NewLine();
+    try draw_value(state, state.output);
 }
 
-fn draw_value(value: preimp.Value) void {
-    _ = value;
+// TODO want to align closing paren with outer edge of content
+fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
+    switch (value.inner) {
+        .nil => ig.Text("nil"),
+        .@"true" => ig.Text("true"),
+        .@"false" => ig.Text("false"),
+        .symbol => |symbol| ig.Text(try state.arena.allocator().dupeZ(u8, symbol)),
+        .string => |string| {
+            const text = u.formatZ(state.arena.allocator(), "\"{}\"", .{std.zig.fmtEscapes(string)});
+            ig.Text(text);
+        },
+        .number => |number| {
+            const text = u.formatZ(state.arena.allocator(), "{}", .{number});
+            ig.Text(text);
+        },
+        .list => |list| {
+            if (ig.BeginTableExt("list", 3, .{
+                //.SizingStretchSame = true
+            }, .{ .x = 0, .y = 0 }, 0)) {
+                for (list) |elem, i| {
+                    ig.TableNextRow();
+                    if (i == 0) {
+                        _ = ig.TableSetColumnIndex(0);
+                        ig.Text("(");
+                    }
+                    _ = ig.TableSetColumnIndex(1);
+                    try draw_value(state, elem);
+                }
+                _ = ig.TableSetColumnIndex(2);
+                ig.Text(")");
+                ig.EndTable();
+            }
+        },
+        .vec => |vec| {
+            if (ig.BeginTableExt("vec", 3, .{
+                //.SizingStretchSame = true
+            }, .{ .x = 0, .y = 0 }, 0)) {
+                for (vec) |elem, i| {
+                    ig.TableNextRow();
+                    if (i == 0) {
+                        _ = ig.TableSetColumnIndex(0);
+                        ig.Text("[");
+                    }
+                    _ = ig.TableSetColumnIndex(1);
+                    try draw_value(state, elem);
+                }
+                _ = ig.TableSetColumnIndex(2);
+                ig.Text("]");
+                ig.EndTable();
+            }
+        },
+        .map => |map| {
+            if (ig.BeginTableExt("map", 4, .{
+                //.SizingStretchSame = true
+            }, .{ .x = 0, .y = 0 }, 0)) {
+                for (map) |key_val, i| {
+                    ig.TableNextRow();
+                    if (i == 0) {
+                        _ = ig.TableSetColumnIndex(0);
+                        ig.Text("{");
+                    }
+                    _ = ig.TableSetColumnIndex(1);
+                    try draw_value(state, key_val.key);
+                    _ = ig.TableSetColumnIndex(2);
+                    try draw_value(state, key_val.val);
+                }
+                _ = ig.TableSetColumnIndex(3);
+                ig.Text("}");
+                ig.EndTable();
+            }
+        },
+        else => ig.Text("!!!"),
+    }
 }

@@ -139,6 +139,14 @@ pub fn format(allocator: Allocator, comptime fmt: []const u8, args: anytype) []c
     return buf.items;
 }
 
+pub fn formatZ(allocator: Allocator, comptime fmt: []const u8, args: anytype) [:0]const u8 {
+    var buf = ArrayList(u8).init(allocator);
+    var writer = buf.writer();
+    std.fmt.format(writer, fmt, args) catch oom();
+    buf.append(0) catch oom();
+    return buf.items[0 .. buf.items.len - 1 :0];
+}
+
 pub fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
     return deepCompare(a, b) == .eq;
 }
