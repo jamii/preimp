@@ -214,7 +214,7 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             ig.Text(text);
         },
         .number => |number| {
-            const text = u.formatZ(state.arena.allocator(), "{}", .{number});
+            const text = u.formatZ(state.arena.allocator(), "{d}", .{number});
             ig.Text(text);
         },
         .list => |list| {

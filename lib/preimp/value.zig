@@ -129,7 +129,7 @@ pub const ValueInner = union(ValueTag) {
             },
             .number => |number| {
                 try writer.writeByteNTimes(' ', indent);
-                try std.fmt.format(writer, "{}", .{number});
+                try std.fmt.format(writer, "{d}", .{number});
                 try writer.writeAll("\n");
             },
             .list => |list| {
