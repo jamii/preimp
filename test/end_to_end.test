@@ -122,9 +122,9 @@ nil
     #
         "wrong number of args"
         {
-            "found"
-            2.0e+00
             "expected"
+            2.0e+00
+            "found"
             1.0e+00
         }
 
@@ -135,9 +135,9 @@ nil
     #
         "wrong number of args"
         {
-            "found"
-            2.0e+00
             "expected"
+            2.0e+00
+            "found"
             3.0e+00
         }
 
@@ -148,9 +148,9 @@ nil
     #
         "wrong number of args"
         {
-            "found"
-            3.0e+00
             "expected"
+            3.0e+00
+            "found"
             2.0e+00
         }
 
@@ -161,9 +161,9 @@ nil
     #
         "wrong number of args"
         {
-            "found"
-            3.0e+00
             "expected"
+            3.0e+00
+            "found"
             4.0e+00
         }
 
@@ -189,9 +189,9 @@ nil
         #
             "unexpected token"
             {
-                "found"
-                "close_list"
                 "expected"
+                "close_list"
+                "found"
                 "close_vec"
             }
 ]
@@ -216,9 +216,9 @@ nil
         #
             "unexpected token"
             {
-                "found"
-                "close_vec"
                 "expected"
+                "close_vec"
+                "found"
                 "eof"
             }
 ]
@@ -348,16 +348,16 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
+    "start token ix"
+    1.1e+01
+    "end token ix"
+    1.2e+01
     "origin"
     [
         foo
         "a"
         1.0e+00
     ]
-    "start token ix"
-    1.1e+01
-    "end token ix"
-    1.2e+01
 }
 
 (def bar ["b" "c"])
@@ -365,15 +365,15 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
+    "start token ix"
+    8.0e+00
+    "end token ix"
+    9.0e+00
     "origin"
     [
         bar
         1.0e+00
     ]
-    "start token ix"
-    8.0e+00
-    "end token ix"
-    9.0e+00
 }
 
 (def bar ["b" "c"])
@@ -381,15 +381,15 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
+    "start token ix"
+    8.0e+00
+    "end token ix"
+    9.0e+00
     "origin"
     [
         bar
         1.0e+00
     ]
-    "start token ix"
-    8.0e+00
-    "end token ix"
-    9.0e+00
 }
 
 (def bar (if true ["b" "c"] ["b" "c"]))

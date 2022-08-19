@@ -186,19 +186,15 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) std.math.Order {
                     return deepCompare(a.*, b.*);
                 },
                 .Slice => {
-                    if (a.len < b.len) {
-                        return .lt;
-                    }
-                    if (a.len > b.len) {
-                        return .gt;
-                    }
-                    for (a) |a_elem, a_ix| {
-                        const ordering = deepCompare(a_elem, b[a_ix]);
+                    const len = std.math.min(a.len, b.len);
+                    var i: usize = 0;
+                    while (i < len) : (i += 1) {
+                        const ordering = deepCompare(a[i], b[i]);
                         if (ordering != .eq) {
                             return ordering;
                         }
                     }
-                    return .eq;
+                    return std.math.order(a.len, b.len);
                 },
                 .Many, .C => @compileError("cannot deepCompare " ++ @typeName(T)),
             }
