@@ -219,9 +219,8 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
         },
         .list => |list| {
             ig.Text("(");
-            ig.TreePush_Str("##list");
-            ig.BeginGroup();
             ig.SameLine();
+            ig.BeginGroup();
             for (list) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 try draw_value(state, elem);
@@ -234,14 +233,11 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             const pos_next_line = ig.GetCursorPos();
             ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
             ig.Text(")");
-            //ig.SetCursorPos(pos_next_line);
-            ig.TreePop();
         },
         .vec => |vec| {
             ig.Text("[");
-            ig.TreePush_Str("##vec");
-            ig.BeginGroup();
             ig.SameLine();
+            ig.BeginGroup();
             for (vec) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 try draw_value(state, elem);
@@ -254,14 +250,11 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             const pos_next_line = ig.GetCursorPos();
             ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
             ig.Text("]");
-            //ig.SetCursorPos(pos_next_line);
-            ig.TreePop();
         },
         .map => |map| {
             ig.Text("{");
-            ig.TreePush_Str("##map");
-            ig.BeginGroup();
             ig.SameLine();
+            ig.BeginGroup();
             for (map) |key_val, i| {
                 if (i != 0)
                     ig.NewLine();
@@ -281,8 +274,6 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             const pos_next_line = ig.GetCursorPos();
             ig.SetCursorPos(.{ .x = pos_next_line.x, .y = pos_group_end.y });
             ig.Text("}");
-            //ig.SetCursorPos(pos_next_line);
-            ig.TreePop();
         },
         else => ig.Text("!!!"),
     }
