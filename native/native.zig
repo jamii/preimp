@@ -77,6 +77,7 @@ pub fn main() !void {
         .arena = u.ArenaAllocator.init(allocator),
         .input = &.{},
         .output = preimp.Value.fromInner(.nil),
+        .hovered_path = null,
     };
     try refresh(&state);
 
@@ -147,6 +148,7 @@ const State = struct {
     // remaining state is arena allocated
     input: []preimp.Value,
     output: preimp.Value,
+    hovered_path: ?[]const usize,
 
     fn deinit(self: *State) void {
         allocator.free(self.source);
@@ -155,6 +157,8 @@ const State = struct {
 };
 
 fn draw(state: *State) !void {
+    state.hovered_path = null;
+
     var num_lines: usize = 1;
     {
         const source = std.mem.sliceTo(state.source, 0);
@@ -196,10 +200,11 @@ fn draw(state: *State) !void {
     if (source_changed)
         try refresh(state);
     ig.NewLine();
+    var path = u.ArrayList(usize).init(state.arena.allocator());
     for (state.input) |expr|
-        try draw_value(state, expr);
+        try draw_value(state, expr, &path);
     ig.NewLine();
-    try draw_value(state, state.output);
+    try draw_value(state, state.output, &path);
 }
 
 fn refresh(state: *State) !void {
@@ -213,9 +218,8 @@ fn refresh(state: *State) !void {
     state.output = try evaluator.evalExprs(state.input, &origin);
 }
 
-fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
+fn draw_value(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) error{OutOfMemory}!void {
     ig.BeginGroup();
-    defer ig.EndGroup();
     switch (value.inner) {
         .nil => ig.Text("nil"),
         .@"true" => ig.Text("true"),
@@ -230,118 +234,118 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             ig.Text(text);
         },
         .list => |list| {
-            const init_x = OpenBrace("(");
-            defer CloseBrace(")", init_x);
+            OpenBrace("(");
+            defer CloseBrace(")") catch unreachable;
             for (list) |elem, i| {
+                try path.append(i);
+                defer _ = path.pop();
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 defer ig.PopID();
-                try draw_value(state, elem);
+                try draw_value(state, elem, path);
             }
         },
         .vec => |vec| {
-            const init_x = OpenBrace("[");
-            defer CloseBrace("]", init_x);
+            OpenBrace("[");
+            defer CloseBrace("]") catch unreachable;
             for (vec) |elem, i| {
+                try path.append(i);
+                defer _ = path.pop();
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 defer ig.PopID();
-                try draw_value(state, elem);
+                try draw_value(state, elem, path);
             }
         },
         .map => |map| {
-            const init_x = OpenBrace("{");
-            defer CloseBrace("}", init_x);
+            OpenBrace("{");
+            defer CloseBrace("}") catch unreachable;
             for (map) |key_val, i| {
                 if (i != 0)
                     ig.NewLine();
+                try path.append(i);
+                defer _ = path.pop();
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 defer ig.PopID();
                 {
+                    try path.append(0);
+                    defer _ = path.pop();
                     _ = ig.PushID_Str("key");
                     defer ig.PopID();
-                    try draw_value(state, key_val.key);
+                    try draw_value(state, key_val.key, path);
                 }
                 {
+                    try path.append(1);
+                    defer _ = path.pop();
                     _ = ig.PushID_Str("val");
                     defer ig.PopID();
-                    try draw_value(state, key_val.val);
+                    try draw_value(state, key_val.val, path);
                 }
             }
         },
         .tagged => |tagged| {
-            const init_x = OpenBrace("#");
-            defer CloseBrace("", init_x);
+            OpenBrace("#");
+            defer CloseBrace("") catch unreachable;
             {
                 _ = ig.PushID_Str("key");
                 defer ig.PopID();
-                try draw_value(state, tagged.key.*);
+                try draw_value(state, tagged.key.*, path);
             }
             {
                 _ = ig.PushID_Str("val");
                 defer ig.PopID();
-                const init_x2 = OpenBrace(" ");
-                defer CloseBrace("", init_x2);
-                try draw_value(state, tagged.val.*);
+                OpenBrace(" ");
+                defer CloseBrace("") catch unreachable;
+                try draw_value(state, tagged.val.*, path);
             }
         },
         .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
         .fun => ig.Text("<fn>"),
         .actions => |actions| {
-            const init_x = OpenBrace("(");
-            defer CloseBrace(")", init_x);
+            OpenBrace("(");
+            defer CloseBrace(")") catch unreachable;
             ig.Text("do");
             for (actions) |action, action_ix| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{action_ix}));
                 defer ig.PopID();
-                const init_x2 = OpenBrace("(");
-                defer CloseBrace(")", init_x2);
+                OpenBrace("(");
+                defer CloseBrace(")") catch unreachable;
                 ig.Text("put-at!");
                 {
-                    const init_x3 = OpenBrace("[");
-                    defer CloseBrace("]", init_x3);
+                    OpenBrace("[");
+                    defer CloseBrace("]") catch unreachable;
                     for (action.origin) |origin_elem, origin_elem_ix| {
                         _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{origin_elem_ix}));
                         defer ig.PopID();
-                        try draw_value(state, origin_elem);
+                        try draw_value(state, origin_elem, path);
                     }
                 }
-                try draw_value(state, action.new);
+                try draw_value(state, action.new, path);
             }
         },
     }
+    ig.EndGroup();
+    if (ig.IsItemHovered() and state.hovered_path == null) {
+        ig.GetBackgroundDrawList().?.AddRect(
+            ig.GetItemRectMin(),
+            ig.GetItemRectMax(),
+            ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
+        );
+        state.hovered_path = try state.arena.allocator().dupe(usize, path.items);
+    }
 }
 
-fn OpenBrace(label: [:0]const u8) f32 {
-    const init_x = ig.GetCursorPosX();
+fn OpenBrace(label: [:0]const u8) void {
     ig.Text(label);
     ig.SameLine();
     ig.SetCursorPosX(ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x);
     ig.BeginGroup();
-    return init_x;
 }
 
-fn CloseBrace(label: [:0]const u8, init_x: f32) void {
+fn CloseBrace(label: [:0]const u8) !void {
     ig.EndGroup();
     const closing_y = ig.GetCursorPosY() - ig.GetTextLineHeightWithSpacing();
     ig.SameLine();
     const closing_x = ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x;
-    var y = ig.GetCursorPosY();
-    ig.BeginDisabled();
-    while (y < closing_y) {
-        ig.SetCursorPosX(closing_x);
-        ig.SetCursorPosY(y);
-        if (label.len != 0) {
-            //ig.Text("|");
-        }
-        y += ig.GetTextLineHeightWithSpacing();
-        ig.SetCursorPosX(init_x);
-        ig.SetCursorPosY(y);
-        if (label.len != 0) {
-            //ig.Text("|");
-        }
-    }
-    ig.EndDisabled();
-    std.debug.assert(y == closing_y);
     ig.SetCursorPosX(closing_x);
-    ig.SetCursorPosY(y);
+    ig.SetCursorPosY(closing_y);
     ig.Text(label);
 }
