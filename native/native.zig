@@ -230,8 +230,8 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             ig.Text(text);
         },
         .list => |list| {
-            OpenBrace("(");
-            defer CloseBrace(")");
+            const init_x = OpenBrace("(");
+            defer CloseBrace(")", init_x);
             for (list) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 defer ig.PopID();
@@ -239,8 +239,8 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             }
         },
         .vec => |vec| {
-            OpenBrace("[");
-            defer CloseBrace("]");
+            const init_x = OpenBrace("[");
+            defer CloseBrace("]", init_x);
             for (vec) |elem, i| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
                 defer ig.PopID();
@@ -248,8 +248,8 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             }
         },
         .map => |map| {
-            OpenBrace("{");
-            defer CloseBrace("}");
+            const init_x = OpenBrace("{");
+            defer CloseBrace("}", init_x);
             for (map) |key_val, i| {
                 if (i != 0)
                     ig.NewLine();
@@ -268,8 +268,8 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             }
         },
         .tagged => |tagged| {
-            OpenBrace("#");
-            defer CloseBrace("");
+            const init_x = OpenBrace("#");
+            defer CloseBrace("", init_x);
             {
                 _ = ig.PushID_Str("key");
                 defer ig.PopID();
@@ -278,26 +278,26 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
             {
                 _ = ig.PushID_Str("val");
                 defer ig.PopID();
-                OpenBrace(" ");
-                defer CloseBrace("");
+                const init_x2 = OpenBrace(" ");
+                defer CloseBrace("", init_x2);
                 try draw_value(state, tagged.val.*);
             }
         },
         .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
         .fun => ig.Text("<fn>"),
         .actions => |actions| {
-            OpenBrace("(");
-            defer CloseBrace(")");
+            const init_x = OpenBrace("(");
+            defer CloseBrace(")", init_x);
             ig.Text("do");
             for (actions) |action, action_ix| {
                 _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{action_ix}));
                 defer ig.PopID();
-                OpenBrace("(");
-                defer CloseBrace(")");
+                const init_x2 = OpenBrace("(");
+                defer CloseBrace(")", init_x2);
                 ig.Text("put-at!");
                 {
-                    OpenBrace("[");
-                    defer CloseBrace("]");
+                    const init_x3 = OpenBrace("[");
+                    defer CloseBrace("]", init_x3);
                     for (action.origin) |origin_elem, origin_elem_ix| {
                         _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{origin_elem_ix}));
                         defer ig.PopID();
@@ -310,18 +310,38 @@ fn draw_value(state: *State, value: preimp.Value) error{OutOfMemory}!void {
     }
 }
 
-fn OpenBrace(label: [:0]const u8) void {
+fn OpenBrace(label: [:0]const u8) f32 {
+    const init_x = ig.GetCursorPosX();
     ig.Text(label);
     ig.SameLine();
     ig.SetCursorPosX(ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x);
     ig.BeginGroup();
+    return init_x;
 }
 
-fn CloseBrace(label: [:0]const u8) void {
+fn CloseBrace(label: [:0]const u8, init_x: f32) void {
     ig.EndGroup();
-    const y = ig.GetCursorPosY();
+    const closing_y = ig.GetCursorPosY() - ig.GetTextLineHeightWithSpacing();
     ig.SameLine();
-    ig.SetCursorPosX(ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x);
-    ig.SetCursorPosY(y - ig.GetTextLineHeightWithSpacing());
+    const closing_x = ig.GetCursorPosX() - ig.GetStyle().?.ItemSpacing.x;
+    var y = ig.GetCursorPosY();
+    ig.BeginDisabled();
+    while (y < closing_y) {
+        ig.SetCursorPosX(closing_x);
+        ig.SetCursorPosY(y);
+        if (label.len != 0) {
+            //ig.Text("|");
+        }
+        y += ig.GetTextLineHeightWithSpacing();
+        ig.SetCursorPosX(init_x);
+        ig.SetCursorPosY(y);
+        if (label.len != 0) {
+            //ig.Text("|");
+        }
+    }
+    ig.EndDisabled();
+    std.debug.assert(y == closing_y);
+    ig.SetCursorPosX(closing_x);
+    ig.SetCursorPosY(y);
     ig.Text(label);
 }
