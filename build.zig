@@ -5,11 +5,9 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     var target = b.standardTargetOptions(.{});
 
-    //const run = addBin(b, mode, target, "run", "Evaluate an imp file", "./bin/run.zig");
-    //run.run.addArgs(b.args orelse &.{});
-
     const test_end_to_end = addBin(b, mode, target, "test_end_to_end", "Run an end-to-end test file", "./test/end_to_end.zig");
-    test_end_to_end.run.addArgs(b.args orelse &.{"./test/end_to_end.test"});
+    const default_args = [1][]const u8{"./test/end_to_end.test"};
+    test_end_to_end.run.addArgs(b.args orelse &default_args);
 
     const test_unit_bin = b.addTestExe("test_unit", "lib/preimp.zig");
     commonSetup(test_unit_bin, mode, target);
@@ -67,6 +65,7 @@ fn commonSetup(
     mode: std.builtin.Mode,
     target: std.zig.CrossTarget,
 ) void {
+    bin.use_stage1 = true; // TODO migrate
     bin.setMainPkgPath("./");
     addDeps(bin);
     bin.setBuildMode(mode);

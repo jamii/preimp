@@ -324,7 +324,7 @@ fn draw_value(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) err
     }
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
-        ig.GetBackgroundDrawList().?.AddRect(
+        ig.GetBackgroundDrawList().?.AddRectFilled(
             ig.GetItemRectMin(),
             ig.GetItemRectMax(),
             ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
