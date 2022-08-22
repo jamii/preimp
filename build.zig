@@ -65,7 +65,8 @@ fn commonSetup(
     mode: std.builtin.Mode,
     target: std.zig.CrossTarget,
 ) void {
-    bin.use_stage1 = true; // TODO migrate
+    // stage2 doesn't like zig-imgui
+    bin.use_stage1 = true;
     bin.setMainPkgPath("./");
     addDeps(bin);
     bin.setBuildMode(mode);
