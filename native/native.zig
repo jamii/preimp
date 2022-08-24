@@ -10,7 +10,7 @@ const gl = @import("./imgui_impl/gl.zig");
 
 const is_darwin = builtin.os.tag.isDarwin();
 
-fn glfw_error_callback(err: c_int, description: ?[*:0]const u8) callconv(.C) void {
+fn glfwErrorCallback(err: c_int, description: ?[*:0]const u8) callconv(.C) void {
     std.debug.print("Glfw Error {}: {any}\n", .{ err, description });
 }
 
@@ -18,7 +18,7 @@ const allocator = std.heap.c_allocator;
 
 pub fn main() !void {
     // Setup window
-    _ = glfw.glfwSetErrorCallback(glfw_error_callback);
+    _ = glfw.glfwSetErrorCallback(glfwErrorCallback);
     if (glfw.glfwInit() == 0)
         return error.GlfwInitFailed;
 
@@ -74,6 +74,7 @@ pub fn main() !void {
     var show_window = true;
     var state = State{
         .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
+        .selection = null,
         .arena = u.ArenaAllocator.init(allocator),
         .input = &.{},
         .output = preimp.Value.fromInner(.nil),
@@ -144,6 +145,7 @@ pub fn main() !void {
 
 const State = struct {
     source: []u8,
+    selection: ?Selection,
     arena: u.ArenaAllocator,
     // remaining state is arena allocated
     input: []preimp.Value,
@@ -154,6 +156,12 @@ const State = struct {
         allocator.free(self.source);
         self.arena.deinit();
     }
+};
+
+const Selection = struct {
+    path: []const usize,
+    // actually null-terminated, but maybe not at this length
+    source: []u8,
 };
 
 fn draw(state: *State) !void {
@@ -170,6 +178,7 @@ fn draw(state: *State) !void {
     }
 
     const MySource = @TypeOf(state.source);
+    // TODO does source need to be null terminated?
     const source_changed = ig.InputTextMultilineExt(
         "##source",
         state.source.ptr,
@@ -184,7 +193,7 @@ fn draw(state: *State) !void {
             .CallbackResize = true,
         },
         struct {
-            export fn resize(data: [*c]ig.InputTextCallbackData) c_int {
+            fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
                 const my_source = @ptrCast(*MySource, @alignCast(@alignOf(MySource), data.*.UserData));
                 if (data.*.EventFlag.CallbackResize) {
                     my_source.* = allocator.realloc(my_source.*, @intCast(usize, data.*.BufSize)) catch unreachable;
@@ -201,10 +210,13 @@ fn draw(state: *State) !void {
         try refresh(state);
     ig.NewLine();
     var path = u.ArrayList(usize).init(state.arena.allocator());
-    for (state.input) |expr|
-        try draw_value(state, expr, &path);
+    for (state.input) |expr, i| {
+        try pathPush(&path, i);
+        defer pathPop(&path);
+        try drawValue(state, expr, &path);
+    }
     ig.NewLine();
-    try draw_value(state, state.output, &path);
+    try drawValue(state, state.output, &path);
 }
 
 fn refresh(state: *State) !void {
@@ -218,7 +230,13 @@ fn refresh(state: *State) !void {
     state.output = try evaluator.evalExprs(state.input, &origin);
 }
 
-fn draw_value(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) error{OutOfMemory}!void {
+fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) error{OutOfMemory}!void {
+    if (state.selection) |*selection| {
+        if (u.deepEqual(selection.path, path.items)) {
+            try drawSelection(state, selection);
+            return;
+        }
+    }
     ig.BeginGroup();
     switch (value.inner) {
         .nil => ig.Text("nil"),
@@ -235,95 +253,107 @@ fn draw_value(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) err
         },
         .list => |list| {
             OpenBrace("(");
-            defer CloseBrace(")") catch unreachable;
+            defer CloseBrace(")");
             for (list) |elem, i| {
-                try path.append(i);
-                defer _ = path.pop();
-                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
-                defer ig.PopID();
-                try draw_value(state, elem, path);
+                try pathPush(path, i);
+                defer pathPop(path);
+                try drawValue(state, elem, path);
             }
         },
         .vec => |vec| {
             OpenBrace("[");
-            defer CloseBrace("]") catch unreachable;
+            defer CloseBrace("]");
             for (vec) |elem, i| {
-                try path.append(i);
-                defer _ = path.pop();
-                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
-                defer ig.PopID();
-                try draw_value(state, elem, path);
+                try pathPush(path, i);
+                defer pathPop(path);
+                try drawValue(state, elem, path);
             }
         },
         .map => |map| {
             OpenBrace("{");
-            defer CloseBrace("}") catch unreachable;
+            defer CloseBrace("}");
             for (map) |key_val, i| {
                 if (i != 0)
                     ig.NewLine();
-                try path.append(i);
-                defer _ = path.pop();
-                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{i}));
-                defer ig.PopID();
+                try pathPush(path, i);
+                defer pathPop(path);
                 {
-                    try path.append(0);
-                    defer _ = path.pop();
-                    _ = ig.PushID_Str("key");
-                    defer ig.PopID();
-                    try draw_value(state, key_val.key, path);
+                    try pathPush(path, 0);
+                    defer pathPop(path);
+                    try drawValue(state, key_val.key, path);
                 }
                 {
-                    try path.append(1);
-                    defer _ = path.pop();
-                    _ = ig.PushID_Str("val");
-                    defer ig.PopID();
-                    try draw_value(state, key_val.val, path);
+                    try pathPush(path, 1);
+                    defer pathPop(path);
+                    try drawValue(state, key_val.val, path);
                 }
             }
         },
         .tagged => |tagged| {
             OpenBrace("#");
-            defer CloseBrace("") catch unreachable;
+            defer CloseBrace("");
             {
-                _ = ig.PushID_Str("key");
-                defer ig.PopID();
-                try draw_value(state, tagged.key.*, path);
+                try pathPush(path, 0);
+                defer pathPop(path);
+                try drawValue(state, tagged.key.*, path);
             }
             {
-                _ = ig.PushID_Str("val");
-                defer ig.PopID();
+                try pathPush(path, 1);
+                defer pathPop(path);
                 OpenBrace(" ");
-                defer CloseBrace("") catch unreachable;
-                try draw_value(state, tagged.val.*, path);
+                defer CloseBrace("");
+                try drawValue(state, tagged.val.*, path);
             }
         },
         .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
         .fun => ig.Text("<fn>"),
         .actions => |actions| {
             OpenBrace("(");
-            defer CloseBrace(")") catch unreachable;
+            defer CloseBrace(")");
             ig.Text("do");
             for (actions) |action, action_ix| {
-                _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{action_ix}));
-                defer ig.PopID();
-                OpenBrace("(");
-                defer CloseBrace(")") catch unreachable;
+                try pathPush(path, action_ix);
+                defer pathPop(path);
                 ig.Text("put-at!");
                 {
+                    try pathPush(path, 0);
+                    defer pathPop(path);
                     OpenBrace("[");
-                    defer CloseBrace("]") catch unreachable;
+                    defer CloseBrace("]");
                     for (action.origin) |origin_elem, origin_elem_ix| {
-                        _ = ig.PushID_Str(u.formatZ(state.arena.allocator(), "##{}", .{origin_elem_ix}));
-                        defer ig.PopID();
-                        try draw_value(state, origin_elem, path);
+                        try pathPush(path, origin_elem_ix);
+                        defer pathPop(path);
+                        try drawValue(state, origin_elem, path);
                     }
                 }
-                try draw_value(state, action.new, path);
+                {
+                    try pathPush(path, 1);
+                    defer pathPop(path);
+                    try drawValue(state, action.new, path);
+                }
             }
         },
     }
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
+        if (ig.IsMouseClicked(.Left)) {
+            if (state.selection) |selection| {
+                allocator.free(selection.path);
+                allocator.free(selection.source);
+            }
+            var source = u.ArrayList(u8).init(allocator);
+            defer source.deinit();
+            preimp.Value.dumpInto(source.writer(), 0, value) catch |err|
+                switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => unreachable,
+            };
+            try source.append(0);
+            state.selection = .{
+                .path = try allocator.dupe(usize, path.items),
+                .source = source.toOwnedSlice(),
+            };
+        }
         ig.GetBackgroundDrawList().?.AddRectFilled(
             ig.GetItemRectMin(),
             ig.GetItemRectMax(),
@@ -333,6 +363,16 @@ fn draw_value(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) err
     }
 }
 
+fn pathPush(path: *u.ArrayList(usize), elem: usize) !void {
+    _ = ig.PushID_Int(@intCast(c_int, elem));
+    try path.append(elem);
+}
+
+fn pathPop(path: *u.ArrayList(usize)) void {
+    _ = ig.PopID();
+    _ = path.pop();
+}
+
 fn OpenBrace(label: [:0]const u8) void {
     ig.Text(label);
     ig.SameLine();
@@ -340,7 +380,7 @@ fn OpenBrace(label: [:0]const u8) void {
     ig.BeginGroup();
 }
 
-fn CloseBrace(label: [:0]const u8) !void {
+fn CloseBrace(label: [:0]const u8) void {
     ig.EndGroup();
     const closing_y = ig.GetCursorPosY() - ig.GetTextLineHeightWithSpacing();
     ig.SameLine();
@@ -348,4 +388,56 @@ fn CloseBrace(label: [:0]const u8) !void {
     ig.SetCursorPosX(closing_x);
     ig.SetCursorPosY(closing_y);
     ig.Text(label);
+}
+
+fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
+    ig.BeginGroup();
+
+    var num_lines: usize = 1;
+    {
+        const source = std.mem.sliceTo(selection.source, 0);
+        for (source) |char| {
+            if (char == '\n') {
+                num_lines += 1;
+            }
+        }
+    }
+
+    const MySource = @TypeOf(selection.source);
+    const source_changed = ig.InputTextMultilineExt(
+        "##source",
+        selection.source.ptr,
+        selection.source.len,
+        .{
+            .x = 0,
+            .y = @intToFloat(f32, num_lines) * ig.GetTextLineHeight() +
+                2 * ig.GetStyle().?.FramePadding.y +
+                2,
+        },
+        .{
+            .CallbackResize = true,
+        },
+        struct {
+            fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
+                const my_source = @ptrCast(*MySource, @alignCast(@alignOf(MySource), data.*.UserData));
+                if (data.*.EventFlag.CallbackResize) {
+                    my_source.* = allocator.realloc(my_source.*, @intCast(usize, data.*.BufSize)) catch unreachable;
+                    data.*.Buf = my_source.ptr;
+                    return 0;
+                } else
+                // We didn't ask for any other events
+                unreachable;
+            }
+        }.resize,
+        @ptrCast(*anyopaque, &selection.source),
+    );
+
+    if (source_changed) {
+        // TODO
+    }
+
+    ig.EndGroup();
+    if (ig.IsItemHovered() and state.hovered_path == null) {
+        state.hovered_path = try state.arena.allocator().dupe(usize, selection.path);
+    }
 }

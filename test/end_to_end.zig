@@ -62,8 +62,7 @@ pub fn main() anyerror!void {
 
             var bytes = u.ArrayList(u8).init(allocator);
             defer bytes.deinit();
-            const writer = bytes.writer();
-            try preimp.Value.dumpInto(writer, 0, value);
+            try preimp.Value.dumpInto(source.writer(), 0, value);
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;
