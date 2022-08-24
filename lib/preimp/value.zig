@@ -331,6 +331,6 @@ pub const Binding = struct {
 };
 
 pub const Action = struct {
-    origin: []const Value,
+    origin: []Value,
     new: Value,
 };

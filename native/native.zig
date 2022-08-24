@@ -71,16 +71,25 @@ pub fn main() !void {
     const fira_code = io.Fonts.?.AddFontFromMemoryTTF(fira_code_ttf.ptr, @intCast(c_int, fira_code_ttf.len), 16.0);
     std.debug.assert(fira_code != null);
 
+    // Global state
     var show_window = true;
     var state = State{
-        .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
         .selection = null,
-        .arena = u.ArenaAllocator.init(allocator),
-        .input = &.{},
+        .input = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
+        .output_arena = u.ArenaAllocator.init(allocator),
         .output = preimp.Value.fromInner(.nil),
         .hovered_path = null,
     };
-    try refresh(&state);
+
+    // Initial example
+    state.selection = .{
+        .path = try allocator.dupe(usize, &[1]usize{0}),
+        .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
+        .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
+    };
+    try parse(&state, &state.selection.?);
+    try completeSelection(&state, &state.selection.?);
+    try evaluate(&state);
 
     // Main loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -144,17 +153,15 @@ pub fn main() !void {
 }
 
 const State = struct {
-    source: []u8,
     selection: ?Selection,
-    arena: u.ArenaAllocator,
-    // remaining state is arena allocated
     input: []preimp.Value,
+    output_arena: u.ArenaAllocator,
     output: preimp.Value,
     hovered_path: ?[]const usize,
 
     fn deinit(self: *State) void {
         allocator.free(self.source);
-        self.arena.deinit();
+        self.output_arena.deinit();
     }
 };
 
@@ -168,49 +175,9 @@ const Selection = struct {
 fn draw(state: *State) !void {
     state.hovered_path = null;
 
-    var num_lines: usize = 1;
-    {
-        const source = std.mem.sliceTo(state.source, 0);
-        for (source) |char| {
-            if (char == '\n') {
-                num_lines += 1;
-            }
-        }
-    }
+    var path = u.ArrayList(usize).init(allocator);
+    defer path.deinit();
 
-    const MySource = @TypeOf(state.source);
-    // TODO does source need to be null terminated?
-    const source_changed = ig.InputTextMultilineExt(
-        "##source",
-        state.source.ptr,
-        state.source.len + 1,
-        .{
-            .x = 0,
-            .y = @intToFloat(f32, num_lines) * ig.GetTextLineHeight() +
-                2 * ig.GetStyle().?.FramePadding.y +
-                1,
-        },
-        .{
-            .CallbackResize = true,
-        },
-        struct {
-            fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
-                const my_source = @ptrCast(*MySource, @alignCast(@alignOf(MySource), data.*.UserData));
-                if (data.*.EventFlag.CallbackResize) {
-                    my_source.* = allocator.realloc(my_source.*, @intCast(usize, data.*.BufSize)) catch unreachable;
-                    data.*.Buf = my_source.ptr;
-                    return 0;
-                } else
-                // We didn't ask for any other events
-                unreachable;
-            }
-        }.resize,
-        @ptrCast(*anyopaque, &state.source),
-    );
-    if (source_changed)
-        try refresh(state);
-    ig.NewLine();
-    var path = u.ArrayList(usize).init(state.arena.allocator());
     {
         ig.PushID_Str("input");
         defer ig.PopID();
@@ -220,23 +187,14 @@ fn draw(state: *State) !void {
             try drawValue(state, expr, &path, .EditSource);
         }
     }
+
     ig.NewLine();
+
     {
         ig.PushID_Str("output");
         defer ig.PopID();
         try drawValue(state, state.output, &path, .None);
     }
-}
-
-fn refresh(state: *State) !void {
-    state.arena.deinit();
-    state.arena = u.ArenaAllocator.init(allocator);
-    const source = try state.arena.allocator().dupeZ(u8, state.source);
-    var parser = try preimp.Parser.init(state.arena.allocator(), source);
-    state.input = try parser.parseExprs(null, .eof);
-    var evaluator = preimp.Evaluator.init(state.arena.allocator());
-    var origin = u.ArrayList(preimp.Value).init(state.arena.allocator());
-    state.output = try evaluator.evalExprs(state.input, &origin);
 }
 
 const Interaction = enum {
@@ -257,11 +215,13 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 {
                     ig.PushID_Str("parsed");
                     defer ig.PopID();
+                    ig.BeginGroup();
                     for (selection.parsed) |parsed_value, i| {
                         try pathPush(path, i);
                         defer pathPop(path);
                         try drawValue(state, parsed_value, path, .None);
                     }
+                    ig.EndGroup();
                 }
                 return;
             }
@@ -272,13 +232,13 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
         .nil => ig.Text("nil"),
         .@"true" => ig.Text("true"),
         .@"false" => ig.Text("false"),
-        .symbol => |symbol| ig.Text(try state.arena.allocator().dupeZ(u8, symbol)),
+        .symbol => |symbol| ig.Text(try allocator.dupeZ(u8, symbol)),
         .string => |string| {
-            const text = u.formatZ(state.arena.allocator(), "\"{}\"", .{std.zig.fmtEscapes(string)});
+            const text = u.formatZ(allocator, "\"{}\"", .{std.zig.fmtEscapes(string)});
             ig.Text(text);
         },
         .number => |number| {
-            const text = u.formatZ(state.arena.allocator(), "{d}", .{number});
+            const text = u.formatZ(allocator, "{d}", .{number});
             ig.Text(text);
         },
         .list => |list| {
@@ -335,7 +295,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 try drawValue(state, tagged.val.*, path, interaction);
             }
         },
-        .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
+        .builtin => |builtin_| ig.Text(try allocator.dupeZ(u8, std.meta.tagName(builtin_))),
         .fun => ig.Text("<fn>"),
         .actions => |actions| {
             OpenBrace("(");
@@ -378,6 +338,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 else => unreachable,
             };
             try source.append(0);
+
             state.selection = .{
                 .path = try allocator.dupe(usize, path.items),
                 .source = source.toOwnedSlice(),
@@ -389,7 +350,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             ig.GetItemRectMax(),
             ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
         );
-        state.hovered_path = try state.arena.allocator().dupe(usize, path.items);
+        state.hovered_path = try allocator.dupe(usize, path.items);
     }
 }
 
@@ -470,33 +431,92 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         @ptrCast(*anyopaque, &user_data),
     );
 
-    if (source_changed) {
-        // TODO duped source is leaked
-        var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
-        // TODO old selection.parsed is leaked
-        selection.parsed = try parser.parseExprs(null, .eof);
+    if (source_changed)
+        try parse(state, selection);
+
+    ig.EndGroup();
+    if (ig.IsItemHovered() and state.hovered_path == null) {
+        state.hovered_path = try allocator.dupe(usize, selection.path);
     }
 
     if (ig.IsKeyPressed(.Escape))
         try cancelSelection(state, selection);
     if (ig.IsKeyPressed(.Enter) and ig.IsKeyDown(.ModCtrl))
         try completeSelection(state, selection);
+}
 
-    ig.EndGroup();
-    if (ig.IsItemHovered() and state.hovered_path == null) {
-        state.hovered_path = try state.arena.allocator().dupe(usize, selection.path);
-    }
+fn parse(state: *State, selection: *Selection) !void {
+    _ = state;
+    // TODO duped source is leaked
+    var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
+    // TODO old selection.parsed is leaked
+    selection.parsed = try parser.parseExprs(null, .eof);
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
-    _ = state;
-    _ = selection;
+    if (selection.parsed.len == 1) {
+        try replaceValue(&state.input[selection.path[0]], selection.path[1..], selection.parsed[0]);
+        try evaluate(state);
+    } // TODO handle error case
     try cancelSelection(state, selection);
 }
 
 fn cancelSelection(state: *State, selection: *Selection) !void {
-    allocator.free(selection.path);
-    allocator.free(selection.source);
-    // TODO free selection.parsed
+    _ = selection;
+    // TODO free selection - probably later in frame
     state.selection = null;
+}
+
+fn replaceValue(input: *preimp.Value, path: []const usize, value: preimp.Value) error{OutOfMemory}!void {
+    if (path.len == 0) {
+        input.* = value;
+    } else {
+        switch (input.inner) {
+            .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => unreachable,
+            .list => |list| {
+                try replaceValue(&list[path[0]], path[1..], value);
+            },
+            .vec => |vec| {
+                try replaceValue(&vec[path[0]], path[1..], value);
+            },
+            .map => |map| {
+                const key_val = &map[path[0]];
+                const elem = switch (path[1]) {
+                    0 => &key_val.key,
+                    1 => &key_val.val,
+                    else => unreachable,
+                };
+                try replaceValue(elem, path[2..], value);
+            },
+            .tagged => |tagged| {
+                const elem = switch (path[0]) {
+                    0 => tagged.key,
+                    1 => tagged.val,
+                    else => unreachable,
+                };
+                try replaceValue(elem, path[1..], value);
+            },
+            .actions => |actions| {
+                const action = &actions[path[0]];
+                switch (path[1]) {
+                    0 => {
+                        const elem = &action.origin[path[2]];
+                        try replaceValue(elem, path[3..], value);
+                    },
+                    1 => {
+                        try replaceValue(&action.new, path[2..], value);
+                    },
+                    else => unreachable,
+                }
+            },
+        }
+    }
+}
+
+fn evaluate(state: *State) !void {
+    state.output_arena.deinit();
+    state.output_arena = u.ArenaAllocator.init(allocator);
+    var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
+    var origin = u.ArrayList(preimp.Value).init(state.output_arena.allocator());
+    state.output = try evaluator.evalExprs(state.input, &origin);
 }

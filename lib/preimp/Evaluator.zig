@@ -94,7 +94,7 @@ pub fn evalExprInner(self: *Evaluator, expr: preimp.Value, origin: ?*u.ArrayList
                         _ = origin.?.pop();
                     }
                     try self.env.append(.{ .name = name, .value = value });
-                    return preimp.Value.fromInner(.{ .nil = {} });
+                    return value;
                 }
                 if (u.deepEqual(head_expr.inner.symbol, "fn")) {
                     // (fn [symbol*] expr*)
