@@ -226,8 +226,6 @@ fn draw(state: *State) !void {
         defer ig.PopID();
         try drawValue(state, state.output, &path, .None);
     }
-
-    u.dump(state.selection);
 }
 
 fn refresh(state: *State) !void {
@@ -369,9 +367,8 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
         if (interaction == .EditSource and ig.IsMouseClicked(.Left)) {
-            if (state.selection) |selection| {
-                allocator.free(selection.path);
-                allocator.free(selection.source);
+            if (state.selection) |*selection| {
+                try completeSelection(state, selection);
             }
             var source = u.ArrayList(u8).init(allocator);
             defer source.deinit();
@@ -436,7 +433,15 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         }
     }
 
-    const MySource = @TypeOf(selection.source);
+    const UserData = struct {
+        state: *State,
+        selection: *Selection,
+    };
+    var user_data = UserData{
+        .state = state,
+        .selection = selection,
+    };
+    ig.SetKeyboardFocusHere();
     const source_changed = ig.InputTextMultilineExt(
         "##source",
         selection.source.ptr,
@@ -452,17 +457,17 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         },
         struct {
             fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
-                const my_source = @ptrCast(*MySource, @alignCast(@alignOf(MySource), data.*.UserData));
+                const my_user_data = @ptrCast(*UserData, @alignCast(@alignOf(UserData), data.*.UserData));
                 if (data.*.EventFlag.CallbackResize) {
-                    my_source.* = allocator.realloc(my_source.*, @intCast(usize, data.*.BufSize)) catch unreachable;
-                    data.*.Buf = my_source.ptr;
+                    my_user_data.selection.source = allocator.realloc(my_user_data.selection.source, @intCast(usize, data.*.BufSize)) catch unreachable;
+                    data.*.Buf = my_user_data.selection.source.ptr;
                     return 0;
-                } else
+                }
                 // We didn't ask for any other events
                 unreachable;
             }
         }.resize,
-        @ptrCast(*anyopaque, &selection.source),
+        @ptrCast(*anyopaque, &user_data),
     );
 
     if (source_changed) {
@@ -472,8 +477,26 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         selection.parsed = try parser.parseExprs(null, .eof);
     }
 
+    if (ig.IsKeyPressed(.Escape))
+        try cancelSelection(state, selection);
+    if (ig.IsKeyPressed(.Enter) and ig.IsKeyDown(.ModCtrl))
+        try completeSelection(state, selection);
+
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
         state.hovered_path = try state.arena.allocator().dupe(usize, selection.path);
     }
+}
+
+fn completeSelection(state: *State, selection: *Selection) !void {
+    _ = state;
+    _ = selection;
+    try cancelSelection(state, selection);
+}
+
+fn cancelSelection(state: *State, selection: *Selection) !void {
+    allocator.free(selection.path);
+    allocator.free(selection.source);
+    // TODO free selection.parsed
+    state.selection = null;
 }
