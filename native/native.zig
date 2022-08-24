@@ -162,6 +162,7 @@ const Selection = struct {
     path: []const usize,
     // actually null-terminated, but maybe not at this length
     source: []u8,
+    parsed: []preimp.Value,
 };
 
 fn draw(state: *State) !void {
@@ -210,13 +211,23 @@ fn draw(state: *State) !void {
         try refresh(state);
     ig.NewLine();
     var path = u.ArrayList(usize).init(state.arena.allocator());
-    for (state.input) |expr, i| {
-        try pathPush(&path, i);
-        defer pathPop(&path);
-        try drawValue(state, expr, &path);
+    {
+        ig.PushID_Str("input");
+        defer ig.PopID();
+        for (state.input) |expr, i| {
+            try pathPush(&path, i);
+            defer pathPop(&path);
+            try drawValue(state, expr, &path, .EditSource);
+        }
     }
     ig.NewLine();
-    try drawValue(state, state.output, &path);
+    {
+        ig.PushID_Str("output");
+        defer ig.PopID();
+        try drawValue(state, state.output, &path, .None);
+    }
+
+    u.dump(state.selection);
 }
 
 fn refresh(state: *State) !void {
@@ -230,11 +241,32 @@ fn refresh(state: *State) !void {
     state.output = try evaluator.evalExprs(state.input, &origin);
 }
 
-fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) error{OutOfMemory}!void {
-    if (state.selection) |*selection| {
-        if (u.deepEqual(selection.path, path.items)) {
-            try drawSelection(state, selection);
-            return;
+const Interaction = enum {
+    EditSource,
+    None,
+};
+
+fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), interaction: Interaction) error{OutOfMemory}!void {
+    if (interaction == .EditSource) {
+        if (state.selection) |*selection| {
+            if (u.deepEqual(selection.path, path.items)) {
+                {
+                    ig.PushID_Str("selection");
+                    defer ig.PopID();
+                    try drawSelection(state, selection);
+                }
+                ig.SameLine();
+                {
+                    ig.PushID_Str("parsed");
+                    defer ig.PopID();
+                    for (selection.parsed) |parsed_value, i| {
+                        try pathPush(path, i);
+                        defer pathPop(path);
+                        try drawValue(state, parsed_value, path, .None);
+                    }
+                }
+                return;
+            }
         }
     }
     ig.BeginGroup();
@@ -257,7 +289,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
             for (list) |elem, i| {
                 try pathPush(path, i);
                 defer pathPop(path);
-                try drawValue(state, elem, path);
+                try drawValue(state, elem, path, interaction);
             }
         },
         .vec => |vec| {
@@ -266,7 +298,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
             for (vec) |elem, i| {
                 try pathPush(path, i);
                 defer pathPop(path);
-                try drawValue(state, elem, path);
+                try drawValue(state, elem, path, interaction);
             }
         },
         .map => |map| {
@@ -280,12 +312,12 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
                 {
                     try pathPush(path, 0);
                     defer pathPop(path);
-                    try drawValue(state, key_val.key, path);
+                    try drawValue(state, key_val.key, path, interaction);
                 }
                 {
                     try pathPush(path, 1);
                     defer pathPop(path);
-                    try drawValue(state, key_val.val, path);
+                    try drawValue(state, key_val.val, path, interaction);
                 }
             }
         },
@@ -295,14 +327,14 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
             {
                 try pathPush(path, 0);
                 defer pathPop(path);
-                try drawValue(state, tagged.key.*, path);
+                try drawValue(state, tagged.key.*, path, interaction);
             }
             {
                 try pathPush(path, 1);
                 defer pathPop(path);
                 OpenBrace(" ");
                 defer CloseBrace("");
-                try drawValue(state, tagged.val.*, path);
+                try drawValue(state, tagged.val.*, path, interaction);
             }
         },
         .builtin => |builtin_| ig.Text(try state.arena.allocator().dupeZ(u8, std.meta.tagName(builtin_))),
@@ -323,20 +355,20 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
                     for (action.origin) |origin_elem, origin_elem_ix| {
                         try pathPush(path, origin_elem_ix);
                         defer pathPop(path);
-                        try drawValue(state, origin_elem, path);
+                        try drawValue(state, origin_elem, path, interaction);
                     }
                 }
                 {
                     try pathPush(path, 1);
                     defer pathPop(path);
-                    try drawValue(state, action.new, path);
+                    try drawValue(state, action.new, path, interaction);
                 }
             }
         },
     }
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
-        if (ig.IsMouseClicked(.Left)) {
+        if (interaction == .EditSource and ig.IsMouseClicked(.Left)) {
             if (state.selection) |selection| {
                 allocator.free(selection.path);
                 allocator.free(selection.source);
@@ -352,6 +384,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize)) erro
             state.selection = .{
                 .path = try allocator.dupe(usize, path.items),
                 .source = source.toOwnedSlice(),
+                .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{value}),
             };
         }
         ig.GetBackgroundDrawList().?.AddRectFilled(
@@ -433,7 +466,10 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
     );
 
     if (source_changed) {
-        // TODO
+        // TODO duped source is leaked
+        var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
+        // TODO old selection.parsed is leaked
+        selection.parsed = try parser.parseExprs(null, .eof);
     }
 
     ig.EndGroup();
