@@ -356,6 +356,18 @@ pub const Value = struct {
         }
         return null;
     }
+
+    pub fn toPath(self: Value, allocator: u.Allocator) !?[]usize {
+        var path = u.ArrayList(usize).init(allocator);
+        defer path.deinit();
+        if (self.inner != .vec) return null;
+        for (self.inner.vec) |elem| {
+            if (elem.inner != .number) return null;
+            // TODO catch not an int
+            try path.append(@floatToInt(usize, elem.inner.number));
+        }
+        return path.toOwnedSlice();
+    }
 };
 
 pub const KeyVal = struct {

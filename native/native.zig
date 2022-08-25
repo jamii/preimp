@@ -84,6 +84,7 @@ pub fn main() !void {
     // Initial example
     state.selection = .{
         .path = try allocator.dupe(usize, &[1]usize{0}),
+        .origin = try allocator.dupe(usize, &[1]usize{0}),
         .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
         .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
     };
@@ -167,6 +168,7 @@ const State = struct {
 
 const Selection = struct {
     path: []const usize,
+    origin: []const usize,
     // actually null-terminated, but maybe not at this length
     source: []u8,
     parsed: []preimp.Value,
@@ -184,7 +186,7 @@ fn draw(state: *State) !void {
         for (state.input) |expr, i| {
             try pathPush(&path, i);
             defer pathPop(&path);
-            try drawValue(state, expr, &path, .EditSource);
+            try drawValue(state, expr, &path, .edit_source);
         }
     }
 
@@ -193,18 +195,18 @@ fn draw(state: *State) !void {
     {
         try pathPush(&path, 1);
         defer pathPop(&path);
-        try drawValue(state, state.output, &path, .None);
+        try drawValue(state, state.output, &path, .edit_origin);
     }
 }
 
 const Interaction = enum {
-    EditSource,
-    EditOrigin,
-    None,
+    edit_source,
+    edit_origin,
+    none,
 };
 
 fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), interaction: Interaction) error{OutOfMemory}!void {
-    if (interaction == .EditSource) {
+    if (interaction != .none) {
         if (state.selection) |*selection| {
             if (u.deepEqual(selection.path, path.items)) {
                 {
@@ -220,7 +222,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                     for (selection.parsed) |parsed_value, i| {
                         try pathPush(path, i);
                         defer pathPop(path);
-                        try drawValue(state, parsed_value, path, .None);
+                        try drawValue(state, parsed_value, path, .none);
                     }
                     ig.EndGroup();
                 }
@@ -327,7 +329,10 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
     }
     ig.EndGroup();
     if (ig.IsItemHovered() and state.hovered_path == null) {
-        if (interaction == .EditSource and ig.IsMouseClicked(.Left)) {
+        if (ig.IsMouseClicked(.Left) and
+            (interaction == .edit_source or
+            (interaction == .edit_origin and value.getOrigin() != null)))
+        {
             if (state.selection) |*selection| {
                 try completeSelection(state, selection);
             }
@@ -342,6 +347,11 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
 
             state.selection = .{
                 .path = try allocator.dupe(usize, path.items),
+                .origin = switch (interaction) {
+                    .edit_source => try allocator.dupe(usize, path.items[1..]),
+                    .edit_origin => (try value.getOrigin().?.toPath(allocator)).?,
+                    .none => unreachable,
+                },
                 .source = source.toOwnedSlice(),
                 .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{value}),
             };
@@ -462,19 +472,7 @@ fn parse(state: *State, selection: *Selection) !void {
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
-    switch (selection.path[0]) {
-        0 => try replaceValues(&state.input, selection.path[1..], selection.parsed),
-        1 => {
-            const origin = getOrigin(state.output, selection.path[1..]).?;
-            var origin_path = u.ArrayList(usize).init(allocator);
-            defer origin_path.deinit();
-            for (origin.inner.vec) |elem| {
-                try origin_path.append(@floatToInt(usize, elem.inner.number));
-            }
-            try replaceValues(&state.input, origin_path.items, selection.parsed);
-        },
-        else => unreachable,
-    }
+    try replaceValues(&state.input, selection.origin, selection.parsed);
     try evaluate(state);
     try cancelSelection(state, selection);
 }
