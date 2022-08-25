@@ -197,6 +197,19 @@ fn draw(state: *State) !void {
         defer pathPop(&path);
         try drawValue(state, state.output, &path, .edit_origin);
     }
+
+    ig.NewLine();
+    if (state.hovered_path) |hovered_path| {
+        try pathPush(&path, 2);
+        defer pathPop(&path);
+        const hovered_value = switch (hovered_path[0]) {
+            0 => getValueAtPath(state.input[hovered_path[1]], hovered_path[2..]),
+            1 => getValueAtPath(state.output, hovered_path[1..]),
+            else => unreachable,
+        };
+        const meta = preimp.Value.fromInner(.{ .map = hovered_value.meta });
+        try drawValue(state, meta, &path, .none);
+    }
 }
 
 const Interaction = enum {
@@ -462,13 +475,6 @@ fn parse(state: *State, selection: *Selection) !void {
     var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
     // TODO old selection.parsed is leaked
     selection.parsed = try parser.parseExprs(null, .eof);
-    var origin = u.ArrayList(preimp.Value).init(allocator);
-    defer origin.deinit();
-    for (selection.parsed) |*expr, i| {
-        try origin.append(try preimp.Value.fromZig(allocator, i));
-        defer _ = origin.pop();
-        _ = try expr.setOriginRecursively(allocator, &origin);
-    }
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
@@ -579,22 +585,29 @@ fn replaceValues(inputs: *[]preimp.Value, path: []const usize, values: []preimp.
 }
 
 fn evaluate(state: *State) !void {
+    var origin = u.ArrayList(preimp.Value).init(allocator);
+    defer origin.deinit();
+    for (state.input) |*expr, i| {
+        try origin.append(try preimp.Value.fromZig(allocator, i));
+        defer _ = origin.pop();
+        _ = try expr.setOriginRecursively(allocator, &origin);
+    }
     state.output_arena.deinit();
     state.output_arena = u.ArenaAllocator.init(allocator);
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
     state.output = try evaluator.evalExprs(state.input);
 }
 
-fn getOrigin(output: preimp.Value, path: []const usize) ?preimp.Value {
+fn getValueAtPath(output: preimp.Value, path: []const usize) preimp.Value {
     if (path.len == 0) {
-        return output.getOrigin();
+        return output;
     } else switch (output.inner) {
         .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => unreachable,
         .list => |list| {
-            return getOrigin(list[path[0]], path[1..]);
+            return getValueAtPath(list[path[0]], path[1..]);
         },
         .vec => |vec| {
-            return getOrigin(vec[path[0]], path[1..]);
+            return getValueAtPath(vec[path[0]], path[1..]);
         },
         .map => |map| {
             const key_val = map[path[0]];
@@ -603,7 +616,7 @@ fn getOrigin(output: preimp.Value, path: []const usize) ?preimp.Value {
                 1 => key_val.val,
                 else => unreachable,
             };
-            return getOrigin(elem, path[2..]);
+            return getValueAtPath(elem, path[2..]);
         },
         .tagged => |tagged| {
             const elem = switch (path[0]) {
@@ -611,17 +624,17 @@ fn getOrigin(output: preimp.Value, path: []const usize) ?preimp.Value {
                 1 => tagged.val.*,
                 else => unreachable,
             };
-            return getOrigin(elem, path[1..]);
+            return getValueAtPath(elem, path[1..]);
         },
         .actions => |actions| {
             const action = actions[path[0]];
             switch (path[1]) {
                 0 => {
                     const elem = action.origin[path[2]];
-                    return getOrigin(elem, path[3..]);
+                    return getValueAtPath(elem, path[3..]);
                 },
                 1 => {
-                    return getOrigin(action.new, path[2..]);
+                    return getValueAtPath(action.new, path[2..]);
                 },
                 else => unreachable,
             }

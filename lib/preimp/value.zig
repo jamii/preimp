@@ -277,23 +277,25 @@ pub const Value = struct {
     }
 
     pub fn setOriginRecursively(self: *Value, allocator: u.Allocator, path: *u.ArrayList(preimp.Value)) error{OutOfMemory}!bool {
-        var did_set_origin = true;
+        var should_set_origin = true;
         switch (self.inner) {
             .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => {},
             .list => |list| {
                 for (list) |*elem, i| {
                     try path.append(try Value.fromZig(allocator, i));
                     defer _ = path.pop();
-                    did_set_origin = did_set_origin and try elem.setOriginRecursively(allocator, path);
+                    const child_set_origin = try elem.setOriginRecursively(allocator, path);
+                    should_set_origin = should_set_origin and child_set_origin;
                 }
                 if (!(list.len > 0 and list[0].toKeyword() != null))
-                    did_set_origin = false;
+                    should_set_origin = false;
             },
             .vec => |vec| {
                 for (vec) |*elem, i| {
                     try path.append(try Value.fromZig(allocator, i));
                     defer _ = path.pop();
-                    did_set_origin = did_set_origin and try elem.setOriginRecursively(allocator, path);
+                    const child_set_origin = try elem.setOriginRecursively(allocator, path);
+                    should_set_origin = should_set_origin and child_set_origin;
                 }
             },
             .map => |map| {
@@ -303,12 +305,14 @@ pub const Value = struct {
                     {
                         try path.append(try Value.fromZig(allocator, 0));
                         defer _ = path.pop();
-                        did_set_origin = did_set_origin and try key_val.key.setOriginRecursively(allocator, path);
+                        const child_set_origin = try key_val.key.setOriginRecursively(allocator, path);
+                        should_set_origin = should_set_origin and child_set_origin;
                     }
                     {
                         try path.append(try Value.fromZig(allocator, 1));
                         defer _ = path.pop();
-                        did_set_origin = did_set_origin and try key_val.val.setOriginRecursively(allocator, path);
+                        const child_set_origin = try key_val.val.setOriginRecursively(allocator, path);
+                        should_set_origin = should_set_origin and child_set_origin;
                     }
                 }
             },
@@ -316,28 +320,38 @@ pub const Value = struct {
                 {
                     try path.append(try Value.fromZig(allocator, 0));
                     defer _ = path.pop();
-                    did_set_origin = did_set_origin and try tagged.key.setOriginRecursively(allocator, path);
+                    const child_set_origin = try tagged.key.setOriginRecursively(allocator, path);
+                    should_set_origin = should_set_origin and child_set_origin;
                 }
                 {
                     try path.append(try Value.fromZig(allocator, 1));
                     defer _ = path.pop();
-                    did_set_origin = did_set_origin and try tagged.val.setOriginRecursively(allocator, path);
+                    const child_set_origin = try tagged.val.setOriginRecursively(allocator, path);
+                    should_set_origin = should_set_origin and child_set_origin;
                 }
             },
             .actions => |_| {
                 // TODO
             },
         }
-        if (did_set_origin)
-            self.meta = try KeyVal.put(
+        self.meta = if (should_set_origin)
+            try KeyVal.put(
                 allocator,
                 self.meta,
                 try Value.format(allocator,
                     \\"origin"
                 , .{}),
                 Value.fromInner(.{ .vec = try allocator.dupe(Value, path.items) }),
+            )
+        else
+            try KeyVal.drop(
+                allocator,
+                self.meta,
+                try Value.format(allocator,
+                    \\"origin"
+                , .{}),
             );
-        return did_set_origin;
+        return should_set_origin;
     }
 
     pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
@@ -399,6 +413,22 @@ pub const KeyVal = struct {
         }
 
         return new_key_vals.toOwnedSlice();
+    }
+
+    pub fn drop(allocator: u.Allocator, key_vals: []KeyVal, key: Value) ![]KeyVal {
+        switch (u.binarySearch(preimp.KeyVal, key, key_vals, {}, (struct {
+            fn compare(_: void, key_: preimp.Value, key_val: preimp.KeyVal) std.math.Order {
+                return u.deepCompare(key_, key_val.key);
+            }
+        }).compare)) {
+            .Found => |pos| {
+                return std.mem.concat(allocator, preimp.KeyVal, &.{
+                    key_vals[0..pos],
+                    key_vals[pos + 1 ..],
+                });
+            },
+            .NotFound => return key_vals,
+        }
     }
 };
 
