@@ -454,10 +454,8 @@ fn parse(state: *State, selection: *Selection) !void {
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
-    if (selection.parsed.len == 1) {
-        try replaceValue(&state.input[selection.path[0]], selection.path[1..], selection.parsed[0]);
-        try evaluate(state);
-    } // TODO handle error case
+    try replaceValues(&state.input, selection.path, selection.parsed);
+    try evaluate(state);
     try cancelSelection(state, selection);
 }
 
@@ -467,49 +465,96 @@ fn cancelSelection(state: *State, selection: *Selection) !void {
     state.selection = null;
 }
 
-fn replaceValue(input: *preimp.Value, path: []const usize, value: preimp.Value) error{OutOfMemory}!void {
-    if (path.len == 0) {
-        input.* = value;
-    } else {
-        switch (input.inner) {
-            .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => unreachable,
-            .list => |list| {
-                try replaceValue(&list[path[0]], path[1..], value);
-            },
-            .vec => |vec| {
-                try replaceValue(&vec[path[0]], path[1..], value);
-            },
-            .map => |map| {
-                const key_val = &map[path[0]];
+fn replaceValue(input: *preimp.Value, path: []const usize, values: []preimp.Value) error{OutOfMemory}!void {
+    std.debug.assert(path.len > 0);
+    switch (input.inner) {
+        .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => unreachable,
+        .list => |*list| {
+            try replaceValues(list, path, values);
+        },
+        .vec => |*vec| {
+            try replaceValues(vec, path, values);
+        },
+        .map => |*map| {
+            std.debug.assert(path.len > 1);
+            if (path.len == 2) {
+                var elems = u.ArrayList(preimp.Value).init(allocator);
+                defer elems.deinit();
+                for (map.*) |key_val| {
+                    try elems.append(key_val.key);
+                    try elems.append(key_val.val);
+                }
+                const ix = 2 * path[0] + path[1];
+                _ = elems.orderedRemove(ix);
+                try elems.insertSlice(ix, values);
+                if (elems.items.len % 2 != 0) {
+                    try elems.insert(
+                        ix + values.len,
+                        try preimp.Value.format(allocator,
+                            \\ #"error" #"odd number of map elems inserted" nil
+                        , .{}),
+                    );
+                }
+                var key_vals = u.ArrayList(preimp.KeyVal).init(allocator);
+                defer key_vals.deinit();
+                var i: usize = 0;
+                while (i < elems.items.len) : (i += 2) {
+                    try key_vals.append(.{
+                        .key = elems.items[i],
+                        .val = elems.items[i + 1],
+                    });
+                }
+                map.* = key_vals.toOwnedSlice();
+            } else {
+                const key_val = &map.*[path[0]];
                 const elem = switch (path[1]) {
                     0 => &key_val.key,
                     1 => &key_val.val,
                     else => unreachable,
                 };
-                try replaceValue(elem, path[2..], value);
-            },
-            .tagged => |tagged| {
-                const elem = switch (path[0]) {
-                    0 => tagged.key,
-                    1 => tagged.val,
-                    else => unreachable,
-                };
-                try replaceValue(elem, path[1..], value);
-            },
-            .actions => |actions| {
-                const action = &actions[path[0]];
-                switch (path[1]) {
-                    0 => {
-                        const elem = &action.origin[path[2]];
-                        try replaceValue(elem, path[3..], value);
-                    },
-                    1 => {
-                        try replaceValue(&action.new, path[2..], value);
-                    },
-                    else => unreachable,
-                }
-            },
-        }
+                try replaceValue(elem, path[2..], values);
+            }
+        },
+        .tagged => |tagged| {
+            const elem = switch (path[0]) {
+                0 => tagged.key,
+                1 => tagged.val,
+                else => unreachable,
+            };
+            if (path.len == 1) {
+                // TODO handle this case properly
+                if (values.len > 0)
+                    elem.* = values[0];
+            } else {
+                try replaceValue(elem, path[1..], values);
+            }
+        },
+        .actions => |actions| {
+            // TODO handle replace properly later
+            const action = &actions[path[0]];
+            switch (path[1]) {
+                0 => {
+                    const elem = &action.origin[path[2]];
+                    try replaceValue(elem, path[3..], values);
+                },
+                1 => {
+                    try replaceValue(&action.new, path[2..], values);
+                },
+                else => unreachable,
+            }
+        },
+    }
+}
+
+fn replaceValues(inputs: *[]preimp.Value, path: []const usize, values: []preimp.Value) !void {
+    if (path.len == 1) {
+        inputs.* = try std.mem.concat(allocator, preimp.Value, &.{
+            inputs.*[0..path[0]],
+            values,
+            inputs.*[path[0] + 1 ..],
+        });
+    } else {
+        try replaceValue(&inputs.*[path[0]], path[1..], values);
     }
 }
 
