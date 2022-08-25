@@ -62,8 +62,7 @@ fn evalInner() !void {
     @setEvalBranchQuota(10000);
     const exprs = try json.parse([]preimp.Value, &token_stream, .{ .allocator = arena.allocator() });
     var evaluator = preimp.Evaluator.init(arena.allocator());
-    var origin = u.ArrayList(preimp.Value).init(arena.allocator());
-    const value = try evaluator.evalExprs(exprs, &origin);
+    const value = try evaluator.evalExprs(exprs);
 
     var output = u.ArrayList(u8).init(allocator);
     try json.stringify(value, .{}, output.writer());

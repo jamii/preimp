@@ -258,12 +258,103 @@ pub const Value = struct {
         }
     }
 
+    pub fn getOrigin(self: Value) ?Value {
+        return KeyVal.get(self.meta, Value.fromInner(.{ .string = "origin" }));
+    }
+
+    pub fn putOrigin(self: Value, allocator: u.Allocator, origin: []preimp.Value) !Value {
+        return Value{
+            .inner = self.inner,
+            .meta = try KeyVal.put(
+                allocator,
+                self.meta,
+                try Value.format(allocator,
+                    \\"origin"
+                , .{}),
+                Value.fromInner(.{ .vec = try allocator.dupe(Value, origin) }),
+            ),
+        };
+    }
+
+    pub fn setOriginRecursively(self: *Value, allocator: u.Allocator, path: *u.ArrayList(preimp.Value)) error{OutOfMemory}!bool {
+        var did_set_origin = true;
+        switch (self.inner) {
+            .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => {},
+            .list => |list| {
+                for (list) |*elem, i| {
+                    try path.append(try Value.fromZig(allocator, i));
+                    defer _ = path.pop();
+                    did_set_origin = did_set_origin and try elem.setOriginRecursively(allocator, path);
+                }
+                if (!(list.len > 0 and list[0].toKeyword() != null))
+                    did_set_origin = false;
+            },
+            .vec => |vec| {
+                for (vec) |*elem, i| {
+                    try path.append(try Value.fromZig(allocator, i));
+                    defer _ = path.pop();
+                    did_set_origin = did_set_origin and try elem.setOriginRecursively(allocator, path);
+                }
+            },
+            .map => |map| {
+                for (map) |*key_val, i| {
+                    try path.append(try Value.fromZig(allocator, i));
+                    defer _ = path.pop();
+                    {
+                        try path.append(try Value.fromZig(allocator, 0));
+                        defer _ = path.pop();
+                        did_set_origin = did_set_origin and try key_val.key.setOriginRecursively(allocator, path);
+                    }
+                    {
+                        try path.append(try Value.fromZig(allocator, 1));
+                        defer _ = path.pop();
+                        did_set_origin = did_set_origin and try key_val.val.setOriginRecursively(allocator, path);
+                    }
+                }
+            },
+            .tagged => |tagged| {
+                {
+                    try path.append(try Value.fromZig(allocator, 0));
+                    defer _ = path.pop();
+                    did_set_origin = did_set_origin and try tagged.key.setOriginRecursively(allocator, path);
+                }
+                {
+                    try path.append(try Value.fromZig(allocator, 1));
+                    defer _ = path.pop();
+                    did_set_origin = did_set_origin and try tagged.val.setOriginRecursively(allocator, path);
+                }
+            },
+            .actions => |_| {
+                // TODO
+            },
+        }
+        if (did_set_origin)
+            self.meta = try KeyVal.put(
+                allocator,
+                self.meta,
+                try Value.format(allocator,
+                    \\"origin"
+                , .{}),
+                Value.fromInner(.{ .vec = try allocator.dupe(Value, path.items) }),
+            );
+        return did_set_origin;
+    }
+
     pub fn dumpInto(writer: anytype, indent: u32, self: Value) anyerror!void {
         try ValueInner.dumpInto(writer, indent, self.inner);
     }
 
     pub fn deepCompare(a: Value, b: Value) std.math.Order {
         return u.deepCompare(a.inner, b.inner);
+    }
+
+    pub fn toKeyword(self: Value) ?Keyword {
+        if (self.inner != .symbol) return null;
+        inline for (@typeInfo(Keyword).Enum.fields) |field| {
+            if (u.deepEqual(self.inner.symbol, field.name))
+                return @intToEnum(Keyword, field.value);
+        }
+        return null;
     }
 };
 
@@ -333,4 +424,10 @@ pub const Binding = struct {
 pub const Action = struct {
     origin: []Value,
     new: Value,
+};
+
+pub const Keyword = enum {
+    def,
+    @"fn",
+    @"if",
 };

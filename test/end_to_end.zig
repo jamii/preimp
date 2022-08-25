@@ -56,13 +56,18 @@ pub fn main() anyerror!void {
 
             var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, source));
             const exprs = try parser.parseExprs(null, .eof);
-            var evaluator = preimp.Evaluator.init(arena.allocator());
             var origin = u.ArrayList(preimp.Value).init(arena.allocator());
-            const value = try evaluator.evalExprs(exprs, &origin);
+            for (exprs) |*expr, i| {
+                try origin.append(try preimp.Value.fromZig(arena.allocator(), i));
+                defer _ = origin.pop();
+                _ = try expr.setOriginRecursively(arena.allocator(), &origin);
+            }
+            var evaluator = preimp.Evaluator.init(arena.allocator());
+            const value = try evaluator.evalExprs(exprs);
 
             var bytes = u.ArrayList(u8).init(allocator);
             defer bytes.deinit();
-            try preimp.Value.dumpInto(source.writer(), 0, value);
+            try preimp.Value.dumpInto(bytes.writer(), 0, value);
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;

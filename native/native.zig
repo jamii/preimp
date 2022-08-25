@@ -179,8 +179,8 @@ fn draw(state: *State) !void {
     defer path.deinit();
 
     {
-        ig.PushID_Str("input");
-        defer ig.PopID();
+        try pathPush(&path, 0);
+        defer pathPop(&path);
         for (state.input) |expr, i| {
             try pathPush(&path, i);
             defer pathPop(&path);
@@ -191,14 +191,15 @@ fn draw(state: *State) !void {
     ig.NewLine();
 
     {
-        ig.PushID_Str("output");
-        defer ig.PopID();
+        try pathPush(&path, 1);
+        defer pathPop(&path);
         try drawValue(state, state.output, &path, .None);
     }
 }
 
 const Interaction = enum {
     EditSource,
+    EditOrigin,
     None,
 };
 
@@ -451,10 +452,29 @@ fn parse(state: *State, selection: *Selection) !void {
     var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
     // TODO old selection.parsed is leaked
     selection.parsed = try parser.parseExprs(null, .eof);
+    var origin = u.ArrayList(preimp.Value).init(allocator);
+    defer origin.deinit();
+    for (selection.parsed) |*expr, i| {
+        try origin.append(try preimp.Value.fromZig(allocator, i));
+        defer _ = origin.pop();
+        _ = try expr.setOriginRecursively(allocator, &origin);
+    }
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
-    try replaceValues(&state.input, selection.path, selection.parsed);
+    switch (selection.path[0]) {
+        0 => try replaceValues(&state.input, selection.path[1..], selection.parsed),
+        1 => {
+            const origin = getOrigin(state.output, selection.path[1..]).?;
+            var origin_path = u.ArrayList(usize).init(allocator);
+            defer origin_path.deinit();
+            for (origin.inner.vec) |elem| {
+                try origin_path.append(@floatToInt(usize, elem.inner.number));
+            }
+            try replaceValues(&state.input, origin_path.items, selection.parsed);
+        },
+        else => unreachable,
+    }
     try evaluate(state);
     try cancelSelection(state, selection);
 }
@@ -547,7 +567,9 @@ fn replaceValue(input: *preimp.Value, path: []const usize, values: []preimp.Valu
 }
 
 fn replaceValues(inputs: *[]preimp.Value, path: []const usize, values: []preimp.Value) !void {
-    if (path.len == 1) {
+    if (path.len == 0) {
+        inputs.* = values;
+    } else if (path.len == 1) {
         inputs.* = try std.mem.concat(allocator, preimp.Value, &.{
             inputs.*[0..path[0]],
             values,
@@ -562,6 +584,49 @@ fn evaluate(state: *State) !void {
     state.output_arena.deinit();
     state.output_arena = u.ArenaAllocator.init(allocator);
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
-    var origin = u.ArrayList(preimp.Value).init(state.output_arena.allocator());
-    state.output = try evaluator.evalExprs(state.input, &origin);
+    state.output = try evaluator.evalExprs(state.input);
+}
+
+fn getOrigin(output: preimp.Value, path: []const usize) ?preimp.Value {
+    if (path.len == 0) {
+        return output.getOrigin();
+    } else switch (output.inner) {
+        .nil, .@"true", .@"false", .symbol, .string, .number, .builtin, .fun => unreachable,
+        .list => |list| {
+            return getOrigin(list[path[0]], path[1..]);
+        },
+        .vec => |vec| {
+            return getOrigin(vec[path[0]], path[1..]);
+        },
+        .map => |map| {
+            const key_val = map[path[0]];
+            const elem = switch (path[1]) {
+                0 => key_val.key,
+                1 => key_val.val,
+                else => unreachable,
+            };
+            return getOrigin(elem, path[2..]);
+        },
+        .tagged => |tagged| {
+            const elem = switch (path[0]) {
+                0 => tagged.key.*,
+                1 => tagged.val.*,
+                else => unreachable,
+            };
+            return getOrigin(elem, path[1..]);
+        },
+        .actions => |actions| {
+            const action = actions[path[0]];
+            switch (path[1]) {
+                0 => {
+                    const elem = action.origin[path[2]];
+                    return getOrigin(elem, path[3..]);
+                },
+                1 => {
+                    return getOrigin(action.new, path[2..]);
+                },
+                else => unreachable,
+            }
+        },
+    }
 }

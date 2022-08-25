@@ -323,6 +323,11 @@ false
     3
     "end token ix"
     4
+    "origin"
+    [
+        0
+        1
+    ]
 }
 
 (put-meta "foo" 42)
@@ -345,18 +350,65 @@ false
 }
 
 (def foo {"a" ["b" "c"]})
-(get-meta (get (get foo "a") 1))
+(get-meta foo)
+---
+{
+    "origin"
+    [
+        0
+        2
+    ]
+}
+
+(def foo {"a" ["b" "c"]})
+(get-meta (get foo "a"))
+---
+{
+    "origin"
+    [
+        0
+        2
+        0
+        1
+    ]
+}
+
+(def foo {"a" ["b" "c"]})
+(get-meta (get (get foo "a") 0))
 ---
 {
     "start token ix"
-    11
+    9
     "end token ix"
-    12
+    10
     "origin"
     [
-        foo
-        "a"
+        0
+        2
+        0
         1
+        0
+    ]
+}
+
+(def foo {"a" ["b" "c"]})
+(get-meta (get foo "b"))
+---
+#
+    "error"
+    #
+        "not found"
+        "b"
+
+(def bar ["b" "c"])
+(def foo {"a" bar})
+(get-meta (get foo "a"))
+---
+{
+    "origin"
+    [
+        0
+        2
     ]
 }
 
@@ -371,7 +423,8 @@ false
     9
     "origin"
     [
-        bar
+        0
+        2
         1
     ]
 }
@@ -387,7 +440,8 @@ false
     9
     "origin"
     [
-        bar
+        0
+        2
         1
     ]
 }
@@ -401,17 +455,25 @@ false
     13
     "end token ix"
     14
+    "origin"
+    [
+        0
+        2
+        2
+        1
+    ]
 }
 
 (def foo {"a" (= 1 1)})
 (get-meta (get foo "a"))
 ---
 {
-    "origin"
-    [
-        foo
-        "a"
-    ]
+}
+
+(def foo {"a" (= 1 1)})
+(get-meta foo)
+---
+{
 }
 
 (put [] 0 "a")
@@ -499,8 +561,10 @@ false
     (
         put-at!
         [
-            foo
-            "a"
+            0
+            2
+            0
+            1
             1
         ]
             "d"
@@ -517,8 +581,10 @@ false
     (
         put-at!
         [
-            foo
-            "a"
+            0
+            2
+            0
+            1
             0
         ]
             "d"
@@ -526,8 +592,10 @@ false
     (
         put-at!
         [
-            foo
-            "a"
+            0
+            2
+            0
+            1
             1
         ]
             "e"
