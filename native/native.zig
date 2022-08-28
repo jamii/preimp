@@ -121,9 +121,6 @@ pub fn main() !void {
 
             try draw(&state);
 
-            ig.NewLine();
-            ig.Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0 / ig.GetIO().Framerate, ig.GetIO().Framerate);
-
             ig.End();
         }
 
