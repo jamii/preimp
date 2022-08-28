@@ -34,17 +34,10 @@ pub fn init(allocator: u.Allocator, source: [:0]const u8) !Parser {
 }
 
 fn pushValue(self: *Parser, values: *u.ArrayList(preimp.Value), value_inner: preimp.ValueInner, start: TokenIx) !void {
-    const meta = try self.allocator.dupe(preimp.KeyVal, &[2]preimp.KeyVal{
-        .{
-            .key = preimp.Value.fromInner(.{ .string = "start token ix" }),
-            .val = preimp.Value.fromInner(.{ .number = @intToFloat(f64, start) }),
-        },
-        .{
-            .key = preimp.Value.fromInner(.{ .string = "end token ix" }),
-            .val = preimp.Value.fromInner(.{ .number = @intToFloat(f64, self.token_ix) }),
-        },
-    });
-    try values.append(.{ .inner = value_inner, .meta = meta });
+    // TODO record source position for error squigglies
+    _ = self;
+    _ = start;
+    try values.append(.{ .inner = value_inner, .meta = &.{} });
 }
 
 pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Tokenizer.Token) error{OutOfMemory}![]preimp.Value {
