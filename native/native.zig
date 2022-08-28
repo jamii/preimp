@@ -193,6 +193,10 @@ fn draw(state: *State) !void {
     defer path.deinit();
 
     {
+        ig.BeginGroup();
+        defer ig.EndGroup();
+        ig.Text("INPUT:");
+        ig.NewLine();
         try pathPush(&path, 0);
         defer pathPop(&path);
         for (state.input) |expr, i| {
@@ -202,16 +206,23 @@ fn draw(state: *State) !void {
         }
     }
 
-    ig.NewLine();
-
     {
+        ig.SameLine();
+        ig.BeginGroup();
+        ig.Text("OUTPUT:");
+        ig.NewLine();
+        defer ig.EndGroup();
         try pathPush(&path, 1);
         defer pathPop(&path);
         try drawValue(state, state.output, &path, .edit_origin);
     }
 
-    ig.NewLine();
     if (state.hovered_path) |hovered_path| {
+        ig.SameLine();
+        ig.BeginGroup();
+        defer ig.EndGroup();
+        ig.Text("DEBUG:");
+        ig.NewLine();
         try pathPush(&path, 2);
         defer pathPop(&path);
         const hovered_value = switch (hovered_path[0]) {
