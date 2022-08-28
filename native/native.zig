@@ -79,6 +79,7 @@ pub fn main() !void {
         .output_arena = u.ArenaAllocator.init(allocator),
         .output = preimp.Value.fromInner(.nil),
         .hovered_path = null,
+        .last_hovered_origin = null,
     };
 
     // Initial example
@@ -159,6 +160,7 @@ const State = struct {
     output_arena: u.ArenaAllocator,
     output: preimp.Value,
     hovered_path: ?[]const usize,
+    last_hovered_origin: ?[]const usize,
 
     fn deinit(self: *State) void {
         allocator.free(self.source);
@@ -175,6 +177,16 @@ const Selection = struct {
 };
 
 fn draw(state: *State) !void {
+    state.last_hovered_origin = null;
+    if (state.hovered_path) |hovered_path| {
+        if (hovered_path[0] == 1) {
+            const last_hovered_value = getValueAtPath(state.output, hovered_path[1..]);
+            if (last_hovered_value.getOrigin()) |origin| {
+                state.last_hovered_origin = (try origin.toPath(allocator)).?;
+            }
+        }
+    }
+
     state.hovered_path = null;
 
     var path = u.ArrayList(usize).init(allocator);
@@ -341,6 +353,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
         },
     }
     ig.EndGroup();
+
     if (ig.IsItemHovered() and state.hovered_path == null) {
         if (ig.IsMouseClicked(.Left) and
             (interaction == .edit_source or
@@ -375,6 +388,14 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
         );
         state.hovered_path = try allocator.dupe(usize, path.items);
+    }
+
+    if (state.last_hovered_origin != null and path.items[0] == 0 and u.deepEqual(state.last_hovered_origin.?, path.items[1..])) {
+        ig.GetBackgroundDrawList().?.AddRectFilled(
+            ig.GetItemRectMin(),
+            ig.GetItemRectMax(),
+            ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
+        );
     }
 }
 
