@@ -125,6 +125,9 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
         .Opaque => {
             try writer.writeAll("opaque");
         },
+        .Float => {
+            try std.fmt.format(writer, "{d}", .{thing});
+        },
         else => {
             // bail
             try std.fmt.format(writer, "{any}", .{thing});

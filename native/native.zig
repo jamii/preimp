@@ -93,6 +93,8 @@ pub fn main() !void {
     try completeSelection(&state, &state.selection.?);
     try evaluate(&state);
 
+    var timer = std.time.Timer.start() catch unreachable;
+
     // Main loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
@@ -102,11 +104,16 @@ pub fn main() !void {
         impl_glfw.NewFrame();
         ig.NewFrame();
 
+        timer.reset();
+
         // Size main window
         const viewport = ig.GetMainViewport().?;
         ig.SetNextWindowPos(viewport.Pos);
         ig.SetNextWindowSize(viewport.Size);
 
+        var pre_draw_time_ms: f64 = 0;
+        var draw_time_ms: f64 = 0;
+        var post_draw_time_ms: f64 = 0;
         if (show_window) {
             _ = ig.BeginExt(
                 "The window",
@@ -119,13 +126,21 @@ pub fn main() !void {
                 }).with(ig.WindowFlags.NoDecoration).with(ig.WindowFlags.NoNav),
             );
 
+            pre_draw_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
+
             try draw(&state);
 
+            draw_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
+
             ig.End();
+
+            post_draw_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
         }
 
         // Rendering
         ig.Render();
+        var ig_render_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
+
         var display_w: c_int = 0;
         var display_h: c_int = 0;
         glfw.glfwGetFramebufferSize(window, &display_w, &display_h);
@@ -139,8 +154,21 @@ pub fn main() !void {
         );
         gl.glClear(gl.GL_COLOR_BUFFER_BIT);
         impl_gl3.RenderDrawData(ig.GetDrawData());
+        var gl_render_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
 
         glfw.glfwSwapBuffers(window);
+        var swap_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
+
+        if (draw_time_ms > 8)
+            u.dump(.{
+                .pre_draw_time_ms = pre_draw_time_ms,
+                .draw_time_ms = draw_time_ms,
+                .post_draw_time_ms = post_draw_time_ms,
+                .ig_render_time_ms = ig_render_time_ms,
+                .gl_render_time_ms = gl_render_time_ms,
+                .swap_time_ms = swap_time_ms,
+                .total_time_ms = pre_draw_time_ms + draw_time_ms + post_draw_time_ms + ig_render_time_ms + gl_render_time_ms + swap_time_ms,
+            });
     }
 
     // Cleanup
@@ -499,11 +527,15 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
 }
 
 fn parse(state: *State, selection: *Selection) !void {
+    var timer = std.time.Timer.start() catch unreachable;
+
     _ = state;
     // TODO duped source is leaked
     var parser = try preimp.Parser.init(allocator, try allocator.dupeZ(u8, selection.source));
     // TODO old selection.parsed is leaked
     selection.parsed = try parser.parseExprs(null, .eof);
+
+    u.dump(.{ .parse_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
@@ -614,6 +646,8 @@ fn replaceValues(inputs: *[]preimp.Value, path: []const usize, values: []preimp.
 }
 
 fn evaluate(state: *State) !void {
+    var timer = std.time.Timer.start() catch unreachable;
+
     var origin = u.ArrayList(preimp.Value).init(allocator);
     defer origin.deinit();
     for (state.input) |*expr, i| {
@@ -625,6 +659,8 @@ fn evaluate(state: *State) !void {
     state.output_arena = u.ArenaAllocator.init(allocator);
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
     state.output = try evaluator.evalExprs(state.input);
+
+    u.dump(.{ .eval_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
 }
 
 fn getValueAtPath(output: preimp.Value, path: []const usize) preimp.Value {
