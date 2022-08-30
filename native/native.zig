@@ -88,7 +88,7 @@ pub fn main() !void {
         .value = preimp.Value.fromInner(.nil),
         .path = try allocator.dupe(usize, &[1]usize{0}),
         .origin = try allocator.dupe(usize, &[1]usize{0}),
-        .source = try allocator.dupeZ(u8, "(fn [x] (+ x 1))"),
+        .source = try allocator.dupeZ(u8, "(fn [] \"foo\")"),
         .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
     };
     try parse(&state, &state.selection.?);
@@ -162,7 +162,7 @@ pub fn main() !void {
         var swap_time_ms = @intToFloat(f64, timer.lap()) / 1E6;
 
         if (draw_time_ms > 8)
-            u.dump(.{
+            reportTime(.{
                 .pre_draw_time_ms = pre_draw_time_ms,
                 .draw_time_ms = draw_time_ms,
                 .post_draw_time_ms = post_draw_time_ms,
@@ -189,20 +189,17 @@ const State = struct {
     hovered: ?Hover,
     last_hovered: ?Hover,
     funs: u.DeepHashMap(FunPath, FunState),
-
-    fn deinit(self: *State) void {
-        allocator.free(self.source);
-        self.output_arena.deinit();
-    }
 };
 
 const Hover = struct {
     path: []const usize,
     origin: ?[]const usize,
+    // TODO storing value is untenable - requires cloning
     value: preimp.Value,
 };
 
 const Selection = struct {
+    // TODO storing value is untenable - requires cloning
     value: preimp.Value,
     path: []const usize,
     origin: []const usize,
@@ -212,28 +209,30 @@ const Selection = struct {
 };
 
 const FunPath = struct {
-    fun: preimp.Fun,
+    //fun: preimp.Fun,
     path: []const usize,
 };
 
 const FunState = struct {
+    // TODO storing fun is untenable - requires cloning
+    fun: preimp.Fun,
     arg_sources: [][]u8,
     // TODO eventually want typed inputs here, not just source
     output_arena: u.ArenaAllocator,
     output: ?preimp.Value,
 
-    fn evaluate(self: *FunState, fun: preimp.Fun) !void {
-        self.output_arena.deinit();
-        self.output_arena = u.ArenaAllocator.init(allocator);
+    fn evaluate(self: *FunState) !void {
+        //TODO memory management
+        //self.output_arena.deinit();
+        //self.output_arena = u.ArenaAllocator.init(allocator);
         const output_allocator = self.output_arena.allocator();
         self.output = null;
 
         var list = u.ArrayList(preimp.Value).init(output_allocator);
-        try list.append(preimp.Value.fromInner(.{ .fun = fun }));
+        try list.append(preimp.Value.fromInner(.{ .fun = self.fun }));
         for (self.arg_sources) |arg_source| {
             var parser = try preimp.Parser.init(output_allocator, try output_allocator.dupeZ(u8, arg_source));
             const exprs = try parser.parseExprs(null, .eof);
-            u.dump(.{ .arg_source = arg_source, .exprs = exprs });
             if (exprs.len != 1)
                 // TODO indicate error in UI
                 return;
@@ -251,7 +250,7 @@ fn draw(state: *State) !void {
     state.hovered = null;
 
     var path = u.ArrayList(usize).init(allocator);
-    defer path.deinit();
+    //defer path.deinit();
 
     {
         ig.BeginGroup();
@@ -393,19 +392,36 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
         .builtin => |builtin_| ig.Text(try allocator.dupeZ(u8, std.meta.tagName(builtin_))),
         .fun => |fun| {
             const fun_path = FunPath{
-                .fun = fun,
                 .path = try allocator.dupe(usize, path.items),
             };
             var entry = try state.funs.getOrPut(fun_path);
+            var is_new = false;
             if (!entry.found_existing) {
                 var arg_sources = try allocator.alloc([]u8, fun.args.len);
                 for (arg_sources) |*arg_source|
                     arg_source.* = try allocator.dupeZ(u8, "");
                 entry.value_ptr.* = FunState{
+                    .fun = try u.deepClone(fun, allocator),
                     .arg_sources = arg_sources,
                     .output_arena = u.ArenaAllocator.init(allocator),
                     .output = null,
                 };
+                is_new = true;
+            }
+            if (!u.deepEqual(entry.value_ptr.*.fun, fun)) {
+                var arg_sources = try allocator.alloc([]u8, fun.args.len);
+                for (arg_sources) |*arg_source, i|
+                    arg_source.* = if (i < entry.value_ptr.arg_sources.len)
+                        entry.value_ptr.arg_sources[i]
+                    else
+                        try allocator.dupeZ(u8, "");
+                entry.value_ptr.* = FunState{
+                    .fun = try u.deepClone(fun, allocator),
+                    .arg_sources = arg_sources,
+                    .output_arena = u.ArenaAllocator.init(allocator),
+                    .output = null,
+                };
+                is_new = true;
             }
             const fun_state = entry.value_ptr;
 
@@ -456,8 +472,9 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 }
             }
 
-            if (fun_state.output == null or arg_sources_changed)
-                try fun_state.evaluate(fun_path.fun);
+            if (is_new or arg_sources_changed) {
+                try fun_state.evaluate();
+            }
 
             if (fun_state.output) |output| {
                 try pathPush(path, 1);
@@ -503,7 +520,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 try completeSelection(state, selection);
             }
             var source = u.ArrayList(u8).init(allocator);
-            defer source.deinit();
+            //defer source.deinit();
             preimp.Value.dumpInto(source.writer(), 0, value) catch |err|
                 switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
@@ -512,7 +529,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             try source.append(0);
 
             state.selection = .{
-                .value = value,
+                .value = try u.deepClone(value, allocator),
                 .path = try allocator.dupe(usize, path.items),
                 .origin = switch (interaction) {
                     .edit_source => try allocator.dupe(usize, path.items[1..]),
@@ -534,7 +551,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                 try origin.toPath(allocator)
             else
                 null,
-            .value = value,
+            .value = try u.deepClone(value, allocator),
         };
     }
 
@@ -641,7 +658,7 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
                 try origin.toPath(allocator)
             else
                 null,
-            .value = selection.value,
+            .value = try u.deepClone(selection.value, allocator),
         };
     }
 
@@ -660,7 +677,7 @@ fn parse(state: *State, selection: *Selection) !void {
     // TODO old selection.parsed is leaked
     selection.parsed = try parser.parseExprs(null, .eof);
 
-    u.dump(.{ .parse_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
+    reportTime(.{ .parse_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
 }
 
 fn completeSelection(state: *State, selection: *Selection) !void {
@@ -689,7 +706,7 @@ fn replaceValue(input: *preimp.Value, path: []const usize, values: []preimp.Valu
             std.debug.assert(path.len > 1);
             if (path.len == 2) {
                 var elems = u.ArrayList(preimp.Value).init(allocator);
-                defer elems.deinit();
+                //defer elems.deinit();
                 for (map.*) |key_val| {
                     try elems.append(key_val.key);
                     try elems.append(key_val.val);
@@ -706,7 +723,7 @@ fn replaceValue(input: *preimp.Value, path: []const usize, values: []preimp.Valu
                     );
                 }
                 var key_vals = u.ArrayList(preimp.KeyVal).init(allocator);
-                defer key_vals.deinit();
+                //defer key_vals.deinit();
                 var i: usize = 0;
                 while (i < elems.items.len) : (i += 2) {
                     try key_vals.append(.{
@@ -774,7 +791,7 @@ fn evaluate(state: *State) !void {
     var timer = std.time.Timer.start() catch unreachable;
 
     var origin = u.ArrayList(preimp.Value).init(allocator);
-    defer origin.deinit();
+    //defer origin.deinit();
     for (state.input) |*expr, i| {
         try origin.append(try preimp.Value.fromZig(allocator, i));
         defer _ = origin.pop();
@@ -786,7 +803,7 @@ fn evaluate(state: *State) !void {
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
     state.output = try evaluator.evalExprs(state.input);
 
-    u.dump(.{ .eval_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
+    reportTime(.{ .eval_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
 }
 
 fn getValueAtPath(output: preimp.Value, path: []const usize) preimp.Value {
@@ -831,4 +848,9 @@ fn getValueAtPath(output: preimp.Value, path: []const usize) preimp.Value {
             }
         },
     }
+}
+
+fn reportTime(time: anytype) void {
+    _ = time;
+    // u.dump(time);
 }

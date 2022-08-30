@@ -39,7 +39,29 @@ pub fn dump(thing: anytype) void {
 }
 
 pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
-    switch (@typeInfo(@TypeOf(thing))) {
+    const T = @TypeOf(thing);
+    if (T == Allocator) {
+        try writer.writeAll("Allocator{}");
+    } else if (T == ArenaAllocator) {
+        try writer.writeAll("ArenaAllocator{}");
+    } else if (comptime std.mem.startsWith(u8, @typeName(T), "std.array_list.ArrayList")) {
+        try dumpInto(writer, indent, thing.items);
+    } else if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
+        var iter = thing.iterator();
+        const is_set = @TypeOf(iter.next().?.value_ptr.*) == void;
+        try writer.writeAll(if (is_set) "HashSet(\n" else "HashMap(\n");
+        while (iter.next()) |entry| {
+            try writer.writeByteNTimes(' ', indent + 4);
+            try dumpInto(writer, indent + 4, entry.key_ptr.*);
+            if (!is_set) {
+                try writer.writeAll(" => ");
+                try dumpInto(writer, indent + 4, entry.value_ptr.*);
+            }
+            try writer.writeAll(",\n");
+        }
+        try writer.writeByteNTimes(' ', indent);
+        try writer.writeAll(")");
+    } else switch (@typeInfo(T)) {
         .Pointer => |pti| {
             switch (pti.size) {
                 .One => {
@@ -135,6 +157,79 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
     }
 }
 
+pub fn deepClone(thing: anytype, allocator: Allocator) error{OutOfMemory}!@TypeOf(thing) {
+    const T = @TypeOf(thing);
+    const ti = @typeInfo(T);
+
+    if (T == std.mem.Allocator)
+        return allocator;
+
+    if (comptime std.mem.startsWith(u8, @typeName(T), "std.array_list.ArrayList")) {
+        var cloned = try ArrayList(@TypeOf(thing.items[0])).initCapacity(allocator, thing.items.len);
+        cloned.appendSliceAssumeCapacity(thing.items);
+        for (cloned.items) |*item| item.* = try deepClone(item.*, allocator);
+        return cloned;
+    }
+
+    if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
+        var cloned = try thing.cloneWithAllocator(allocator);
+        var iter = cloned.iterator();
+        while (iter.next()) |entry| {
+            entry.key_ptr.* = try deepClone(entry.key_ptr.*, allocator);
+            entry.value_ptr.* = try deepClone(entry.value_ptr.*, allocator);
+        }
+        return cloned;
+    }
+
+    switch (ti) {
+        .Bool, .Int, .Float, .Enum, .Void, .Fn => return thing,
+        .Pointer => |pti| {
+            switch (pti.size) {
+                .One => {
+                    const cloned = try allocator.create(pti.child);
+                    cloned.* = try deepClone(thing.*, allocator);
+                    return cloned;
+                },
+                .Slice => {
+                    const cloned = try allocator.alloc(pti.child, thing.len);
+                    for (thing) |item, i| cloned[i] = try deepClone(item, allocator);
+                    return cloned;
+                },
+                .Many, .C => compileError("Cannot deepClone {}", .{T}),
+            }
+        },
+        .Array => {
+            var cloned = thing;
+            for (cloned) |*item| item.* = try deepClone(item.*, allocator);
+            return cloned;
+        },
+        .Optional => {
+            return if (thing == null) null else try deepClone(thing.?, allocator);
+        },
+        .Struct => |sti| {
+            var cloned: T = undefined;
+            inline for (sti.fields) |fti| {
+                @field(cloned, fti.name) = try deepClone(@field(thing, fti.name), allocator);
+            }
+            return cloned;
+        },
+        .Union => |uti| {
+            if (uti.tag_type) |tag_type| {
+                const tag = @enumToInt(std.meta.activeTag(thing));
+                inline for (@typeInfo(tag_type).Enum.fields) |fti| {
+                    if (tag == fti.value) {
+                        return @unionInit(T, fti.name, try deepClone(@field(thing, fti.name), allocator));
+                    }
+                }
+                unreachable;
+            } else {
+                compileError("Cannot deepClone {}", .{T});
+            }
+        },
+        else => compileError("Cannot deepClone {}", .{T}),
+    }
+}
+
 pub fn format(allocator: Allocator, comptime fmt: []const u8, args: anytype) []const u8 {
     var buf = ArrayList(u8).init(allocator);
     var writer = buf.writer();
@@ -186,7 +281,10 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) std.math.Order {
         .Pointer => |pti| {
             switch (pti.size) {
                 .One => {
-                    return deepCompare(a.*, b.*);
+                    return if (a == b)
+                        .eq
+                    else
+                        deepCompare(a.*, b.*);
                 },
                 .Slice => {
                     const len = std.math.min(a.len, b.len);
@@ -412,4 +510,8 @@ pub fn binarySearch(
     }
 
     return .{ .NotFound = left };
+}
+
+pub fn compileError(comptime message: []const u8, comptime args: anytype) void {
+    @compileError(comptime std.fmt.comptimePrint(message, args));
 }

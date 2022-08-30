@@ -287,8 +287,11 @@ pub const Value = struct {
                     const child_set_origin = try elem.setOriginRecursively(allocator, path);
                     should_set_origin = should_set_origin and child_set_origin;
                 }
-                if (!(list.len > 0 and list[0].toKeyword() != null))
-                    should_set_origin = false;
+                if (list.len > 0) {
+                    const keyword = list[0].toKeyword();
+                    if (keyword == null or keyword.? == .@"fn")
+                        should_set_origin = false;
+                }
             },
             .vec => |vec| {
                 for (vec) |*elem, i| {
