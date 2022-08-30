@@ -78,13 +78,14 @@ pub fn main() !void {
         .input = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
         .output_arena = u.ArenaAllocator.init(allocator),
         .output = preimp.Value.fromInner(.nil),
-        .hovered_path = null,
-        .last_hovered_origin = null,
+        .hovered = null,
+        .last_hovered = null,
         .funs = u.DeepHashMap(FunPath, FunState).init(allocator),
     };
 
     // Initial example
     state.selection = .{
+        .value = preimp.Value.fromInner(.nil),
         .path = try allocator.dupe(usize, &[1]usize{0}),
         .origin = try allocator.dupe(usize, &[1]usize{0}),
         .source = try allocator.dupeZ(u8, "(fn [x] (+ x 1))"),
@@ -185,8 +186,8 @@ const State = struct {
     input: []preimp.Value,
     output_arena: u.ArenaAllocator,
     output: preimp.Value,
-    hovered_path: ?[]const usize,
-    last_hovered_origin: ?[]const usize,
+    hovered: ?Hover,
+    last_hovered: ?Hover,
     funs: u.DeepHashMap(FunPath, FunState),
 
     fn deinit(self: *State) void {
@@ -195,7 +196,14 @@ const State = struct {
     }
 };
 
+const Hover = struct {
+    path: []const usize,
+    origin: ?[]const usize,
+    value: preimp.Value,
+};
+
 const Selection = struct {
+    value: preimp.Value,
     path: []const usize,
     origin: []const usize,
     // actually null-terminated, but maybe not at this length
@@ -239,17 +247,8 @@ const FunState = struct {
 };
 
 fn draw(state: *State) !void {
-    state.last_hovered_origin = null;
-    if (state.hovered_path) |hovered_path| {
-        if (hovered_path[0] == 1) {
-            const last_hovered_value = getValueAtPath(state.output, hovered_path[1..]);
-            if (last_hovered_value.getOrigin()) |origin| {
-                state.last_hovered_origin = (try origin.toPath(allocator)).?;
-            }
-        }
-    }
-
-    state.hovered_path = null;
+    state.last_hovered = state.hovered;
+    state.hovered = null;
 
     var path = u.ArrayList(usize).init(allocator);
     defer path.deinit();
@@ -279,7 +278,7 @@ fn draw(state: *State) !void {
         try drawValue(state, state.output, &path, .edit_origin);
     }
 
-    if (state.hovered_path) |hovered_path| {
+    if (state.hovered) |hovered| {
         ig.SameLine();
         ig.BeginGroup();
         defer ig.EndGroup();
@@ -287,12 +286,7 @@ fn draw(state: *State) !void {
         ig.NewLine();
         try pathPush(&path, 2);
         defer pathPop(&path);
-        const hovered_value = switch (hovered_path[0]) {
-            0 => getValueAtPath(state.input[hovered_path[1]], hovered_path[2..]),
-            1 => getValueAtPath(state.output, hovered_path[1..]),
-            else => unreachable,
-        };
-        const meta = preimp.Value.fromInner(.{ .map = hovered_value.meta });
+        const meta = preimp.Value.fromInner(.{ .map = hovered.value.meta });
         try drawValue(state, meta, &path, .none);
     }
 }
@@ -500,7 +494,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
     }
     ig.EndGroup();
 
-    if (ig.IsItemHovered() and state.hovered_path == null) {
+    if (ig.IsItemHovered() and state.hovered == null) {
         if (ig.IsMouseClicked(.Left) and
             (interaction == .edit_source or
             (interaction == .edit_origin and value.getOrigin() != null)))
@@ -518,6 +512,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             try source.append(0);
 
             state.selection = .{
+                .value = value,
                 .path = try allocator.dupe(usize, path.items),
                 .origin = switch (interaction) {
                     .edit_source => try allocator.dupe(usize, path.items[1..]),
@@ -533,10 +528,21 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             ig.GetItemRectMax(),
             ig.Color.initHSVA(0, 0.0, 0.9, 0.3).packABGR(),
         );
-        state.hovered_path = try allocator.dupe(usize, path.items);
+        state.hovered = .{
+            .path = try allocator.dupe(usize, path.items),
+            .origin = if (value.getOrigin()) |origin|
+                try origin.toPath(allocator)
+            else
+                null,
+            .value = value,
+        };
     }
 
-    if (state.last_hovered_origin != null and path.items[0] == 0 and u.deepEqual(state.last_hovered_origin.?, path.items[1..])) {
+    if (path.items[0] == 0 and
+        state.last_hovered != null and
+        state.last_hovered.?.origin != null and
+        u.deepEqual(state.last_hovered.?.origin.?, path.items[1..]))
+    {
         ig.GetBackgroundDrawList().?.AddRectFilled(
             ig.GetItemRectMin(),
             ig.GetItemRectMax(),
@@ -626,8 +632,15 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         try parse(state, selection);
 
     ig.EndGroup();
-    if (ig.IsItemHovered() and state.hovered_path == null) {
-        state.hovered_path = try allocator.dupe(usize, selection.path);
+    if (ig.IsItemHovered() and state.hovered == null) {
+        state.hovered = .{
+            .path = try allocator.dupe(usize, selection.path),
+            .origin = if (selection.value.getOrigin()) |origin|
+                try origin.toPath(allocator)
+            else
+                null,
+            .value = selection.value,
+        };
     }
 
     if (ig.IsKeyPressed(.Escape))
@@ -765,8 +778,9 @@ fn evaluate(state: *State) !void {
         defer _ = origin.pop();
         _ = try expr.setOriginRecursively(allocator, &origin);
     }
-    state.output_arena.deinit();
-    state.output_arena = u.ArenaAllocator.init(allocator);
+    // TODO memory management lol
+    //state.output_arena.deinit();
+    //state.output_arena = u.ArenaAllocator.init(allocator);
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
     state.output = try evaluator.evalExprs(state.input);
 
