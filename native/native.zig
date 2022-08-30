@@ -80,13 +80,14 @@ pub fn main() !void {
         .output = preimp.Value.fromInner(.nil),
         .hovered_path = null,
         .last_hovered_origin = null,
+        .funs = u.DeepHashMap(FunPath, FunState).init(allocator),
     };
 
     // Initial example
     state.selection = .{
         .path = try allocator.dupe(usize, &[1]usize{0}),
         .origin = try allocator.dupe(usize, &[1]usize{0}),
-        .source = try allocator.dupeZ(u8, "{{[1 2] [3 4] [5 6] #foo (+ 7 8)} {\"a\" \"b\"}}"),
+        .source = try allocator.dupeZ(u8, "(fn [x] (+ x 1))"),
         .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
     };
     try parse(&state, &state.selection.?);
@@ -186,6 +187,7 @@ const State = struct {
     output: preimp.Value,
     hovered_path: ?[]const usize,
     last_hovered_origin: ?[]const usize,
+    funs: u.DeepHashMap(FunPath, FunState),
 
     fn deinit(self: *State) void {
         allocator.free(self.source);
@@ -199,6 +201,41 @@ const Selection = struct {
     // actually null-terminated, but maybe not at this length
     source: []u8,
     parsed: []preimp.Value,
+};
+
+const FunPath = struct {
+    fun: preimp.Fun,
+    path: []const usize,
+};
+
+const FunState = struct {
+    arg_sources: [][]u8,
+    // TODO eventually want typed inputs here, not just source
+    output_arena: u.ArenaAllocator,
+    output: ?preimp.Value,
+
+    fn evaluate(self: *FunState, fun: preimp.Fun) !void {
+        self.output_arena.deinit();
+        self.output_arena = u.ArenaAllocator.init(allocator);
+        const output_allocator = self.output_arena.allocator();
+        self.output = null;
+
+        var list = u.ArrayList(preimp.Value).init(output_allocator);
+        try list.append(preimp.Value.fromInner(.{ .fun = fun }));
+        for (self.arg_sources) |arg_source| {
+            var parser = try preimp.Parser.init(output_allocator, try output_allocator.dupeZ(u8, arg_source));
+            const exprs = try parser.parseExprs(null, .eof);
+            u.dump(.{ .arg_source = arg_source, .exprs = exprs });
+            if (exprs.len != 1)
+                // TODO indicate error in UI
+                return;
+            try list.append(exprs[0]);
+        }
+        const expr = preimp.Value.fromInner(.{ .list = list.items });
+
+        var evaluator = preimp.Evaluator.init(output_allocator);
+        self.output = try evaluator.evalExprs(&[1]preimp.Value{expr});
+    }
 };
 
 fn draw(state: *State) !void {
@@ -360,7 +397,80 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             }
         },
         .builtin => |builtin_| ig.Text(try allocator.dupeZ(u8, std.meta.tagName(builtin_))),
-        .fun => ig.Text("<fn>"),
+        .fun => |fun| {
+            const fun_path = FunPath{
+                .fun = fun,
+                .path = try allocator.dupe(usize, path.items),
+            };
+            var entry = try state.funs.getOrPut(fun_path);
+            if (!entry.found_existing) {
+                var arg_sources = try allocator.alloc([]u8, fun.args.len);
+                for (arg_sources) |*arg_source|
+                    arg_source.* = try allocator.dupeZ(u8, "");
+                entry.value_ptr.* = FunState{
+                    .arg_sources = arg_sources,
+                    .output_arena = u.ArenaAllocator.init(allocator),
+                    .output = null,
+                };
+            }
+            const fun_state = entry.value_ptr;
+
+            OpenBrace("(");
+            defer CloseBrace(")");
+            ig.Text("fn");
+
+            var arg_sources_changed = false;
+            {
+                try pathPush(path, 0);
+                defer pathPop(path);
+                OpenBrace("[");
+                defer CloseBrace("]");
+                for (fun.args) |arg_name, i| {
+                    try pathPush(path, i);
+                    defer pathPop(path);
+
+                    ig.BeginDisabled();
+                    ig.Text(try allocator.dupeZ(u8, arg_name));
+                    ig.EndDisabled();
+                    ig.SameLine();
+
+                    var user_data = &fun_state.arg_sources[i];
+                    const UserData = @TypeOf(user_data);
+                    const arg_source_changed = ig.InputTextExt(
+                        "##source",
+                        user_data.ptr,
+                        user_data.len,
+                        .{
+                            .CallbackResize = true,
+                        },
+                        struct {
+                            fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
+                                const my_user_data = @ptrCast(UserData, @alignCast(@alignOf(UserData), data.*.UserData));
+                                if (data.*.EventFlag.CallbackResize) {
+                                    my_user_data.* = allocator.realloc(my_user_data.*, @intCast(usize, data.*.BufSize)) catch unreachable;
+                                    data.*.Buf = my_user_data.*.ptr;
+                                    return 0;
+                                }
+                                // We didn't ask for any other events
+                                unreachable;
+                            }
+                        }.resize,
+                        @ptrCast(*anyopaque, user_data),
+                    );
+
+                    arg_sources_changed = arg_sources_changed or arg_source_changed;
+                }
+            }
+
+            if (fun_state.output == null or arg_sources_changed)
+                try fun_state.evaluate(fun_path.fun);
+
+            if (fun_state.output) |output| {
+                try pathPush(path, 1);
+                defer pathPop(path);
+                try drawValue(state, output, path, .edit_origin);
+            }
+        },
         .actions => |actions| {
             OpenBrace("(");
             defer CloseBrace(")");
