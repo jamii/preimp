@@ -612,6 +612,8 @@ fn drawSelection(state: *State, selection: *Selection) error{OutOfMemory}!void {
         },
         .{
             .CallbackResize = true,
+            // TODO this flag doesn't take effect
+            .AutoSelectAll = true,
         },
         struct {
             fn resize(data: [*c]ig.InputTextCallbackData) callconv(.C) c_int {
