@@ -88,7 +88,7 @@ pub fn main() !void {
         .value = preimp.Value.fromInner(.nil),
         .path = try allocator.dupe(usize, &[1]usize{0}),
         .origin = try allocator.dupe(usize, &[1]usize{0}),
-        .source = try allocator.dupeZ(u8, "(fn [] \"foo\")"),
+        .source = try allocator.dupeZ(u8, "(def x 1)\n(put! x (+ x 1))"),
         .parsed = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
     };
     try parse(&state, &state.selection.?);
@@ -483,28 +483,40 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             }
         },
         .actions => |actions| {
-            OpenBrace("(");
-            defer CloseBrace(")");
-            ig.Text("do");
-            for (actions) |action, action_ix| {
-                try pathPush(path, action_ix);
-                defer pathPop(path);
-                ig.Text("put-at!");
-                {
-                    try pathPush(path, 0);
+            if (ig.Button("!")) {
+                const new_values = try allocator.alloc(preimp.Value, actions.len);
+                for (new_values) |*new_value, i|
+                    new_value.* = try u.deepClone(actions[i].new, allocator);
+                for (actions) |action, i|
+                    try replaceValues(&state.input, action.origin, new_values[i .. i + 1]);
+                try evaluate(state);
+            }
+            if (ig.IsItemHovered()) {
+                ig.BeginTooltip();
+                defer ig.EndTooltip();
+                OpenBrace("(");
+                defer CloseBrace(")");
+                ig.Text("do");
+                for (actions) |action, action_ix| {
+                    try pathPush(path, action_ix);
                     defer pathPop(path);
-                    OpenBrace("[");
-                    defer CloseBrace("]");
-                    for (action.origin) |origin_elem, origin_elem_ix| {
-                        try pathPush(path, origin_elem_ix);
+                    ig.Text("put-at!");
+                    {
+                        try pathPush(path, 0);
                         defer pathPop(path);
-                        try drawValue(state, origin_elem, path, interaction);
+                        OpenBrace("[");
+                        defer CloseBrace("]");
+                        for (action.origin) |origin_elem, origin_elem_ix| {
+                            try pathPush(path, origin_elem_ix);
+                            defer pathPop(path);
+                            try drawValue(state, try preimp.Value.fromZig(allocator, origin_elem), path, interaction);
+                        }
                     }
-                }
-                {
-                    try pathPush(path, 1);
-                    defer pathPop(path);
-                    try drawValue(state, action.new, path, interaction);
+                    {
+                        try pathPush(path, 1);
+                        defer pathPop(path);
+                        try drawValue(state, action.new, path, interaction);
+                    }
                 }
             }
         },
@@ -756,19 +768,9 @@ fn replaceValue(input: *preimp.Value, path: []const usize, values: []preimp.Valu
                 try replaceValue(elem, path[1..], values);
             }
         },
-        .actions => |actions| {
-            // TODO handle replace properly later
-            const action = &actions[path[0]];
-            switch (path[1]) {
-                0 => {
-                    const elem = &action.origin[path[2]];
-                    try replaceValue(elem, path[3..], values);
-                },
-                1 => {
-                    try replaceValue(&action.new, path[2..], values);
-                },
-                else => unreachable,
-            }
+        .actions => {
+            // TODO
+            unreachable;
         },
     }
 }
@@ -834,18 +836,9 @@ fn getValueAtPath(output: preimp.Value, path: []const usize) preimp.Value {
             };
             return getValueAtPath(elem, path[1..]);
         },
-        .actions => |actions| {
-            const action = actions[path[0]];
-            switch (path[1]) {
-                0 => {
-                    const elem = action.origin[path[2]];
-                    return getValueAtPath(elem, path[3..]);
-                },
-                1 => {
-                    return getValueAtPath(action.new, path[2..]);
-                },
-                else => unreachable,
-            }
+        .actions => {
+            // TODO
+            unreachable;
         },
     }
 }

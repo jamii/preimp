@@ -191,8 +191,10 @@ pub const ValueInner = union(ValueTag) {
                     try writer.writeByteNTimes(' ', indent + 8);
                     try writer.writeAll("[");
                     try writer.writeAll("\n");
-                    for (action.origin) |value| {
-                        try Value.dumpInto(writer, indent + 12, value);
+                    for (action.origin) |elem| {
+                        try writer.writeByteNTimes(' ', indent + 8);
+                        try std.fmt.format(writer, "{d}", .{elem});
+                        try writer.writeAll("\n");
                     }
                     try writer.writeByteNTimes(' ', indent + 8);
                     try writer.writeAll("]");
@@ -467,7 +469,7 @@ pub const Binding = struct {
 };
 
 pub const Action = struct {
-    origin: []Value,
+    origin: []usize,
     new: Value,
 };
 

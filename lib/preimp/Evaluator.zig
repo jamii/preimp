@@ -381,7 +381,7 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                                         preimp.Action,
                                         &[1]preimp.Action{
                                             .{
-                                                .origin = old_origin.inner.vec,
+                                                .origin = (try old_origin.toPath(self.allocator)).?,
                                                 .new = new,
                                             },
                                         },
