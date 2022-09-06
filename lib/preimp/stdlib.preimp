@@ -1,1 +1,3 @@
-(def the-number 42)
+(def append
+  (fn [vec elem]
+    (put vec (count vec) elem)))

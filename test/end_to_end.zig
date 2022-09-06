@@ -45,6 +45,12 @@ pub fn main() anyerror!void {
 
         var rewritten_tests = u.ArrayList(u8).init(allocator);
         var cases_iter = std.mem.split(u8, cases.items, "\n\n");
+
+        var stdlib_parser = try preimp.Parser.init(allocator, preimp.stdlib);
+        const stdlib = try stdlib_parser.parseExprs(null, .eof);
+        var stdlib_evaluator = preimp.Evaluator.init(allocator);
+        _ = try stdlib_evaluator.evalExprsKeepEnv(stdlib);
+
         while (cases_iter.next()) |case| {
             var case_iter = std.mem.split(u8, case, "---");
             const source = std.mem.trim(u8, case_iter.next().?, "\n ");
@@ -53,7 +59,6 @@ pub fn main() anyerror!void {
 
             var arena = u.ArenaAllocator.init(allocator);
             defer arena.deinit();
-
             var parser = try preimp.Parser.init(arena.allocator(), try arena.allocator().dupeZ(u8, source));
             const exprs = try parser.parseExprs(null, .eof);
             var origin = u.ArrayList(preimp.Value).init(arena.allocator());
@@ -63,6 +68,7 @@ pub fn main() anyerror!void {
                 _ = try expr.setOriginRecursively(arena.allocator(), &origin);
             }
             var evaluator = preimp.Evaluator.init(arena.allocator());
+            try evaluator.env.appendSlice(stdlib_evaluator.env.items);
             const value = try evaluator.evalExprs(exprs);
 
             var bytes = u.ArrayList(u8).init(allocator);

@@ -475,6 +475,21 @@ false
     "b"
 ]
 
+(def x ["a"])
+(put x (count x) "b")
+---
+[
+    "a"
+    "b"
+]
+
+(append ["a"] "b")
+---
+[
+    "a"
+    "b"
+]
+
 (put ["a"] 2 "b")
 ---
 #
