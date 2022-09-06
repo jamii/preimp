@@ -13,13 +13,17 @@ pub fn init(allocator: u.Allocator) Evaluator {
     };
 }
 
-pub fn evalExprs(self: *Evaluator, exprs: []const preimp.Value) error{OutOfMemory}!preimp.Value {
-    const env_start = self.env.items.len;
-    defer self.env.shrinkRetainingCapacity(env_start);
+pub fn evalExprsKeepEnv(self: *Evaluator, exprs: []const preimp.Value) error{OutOfMemory}!preimp.Value {
     var value = preimp.Value.fromInner(.nil);
     for (exprs) |expr|
         value = try self.evalExpr(expr);
     return value;
+}
+
+pub fn evalExprs(self: *Evaluator, exprs: []const preimp.Value) error{OutOfMemory}!preimp.Value {
+    const env_start = self.env.items.len;
+    defer self.env.shrinkRetainingCapacity(env_start);
+    return self.evalExprsKeepEnv(exprs);
 }
 
 pub fn evalExpr(self: *Evaluator, expr: preimp.Value) error{OutOfMemory}!preimp.Value {
