@@ -113,9 +113,11 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                         const val = map_exprs[i + 1];
                         try map_values.append(.{ .key = key, .val = val });
                     }
-                    u.deepSort(map_values.items);
-                    // TODO check no duplicate values
-                    try self.pushValue(&values, .{ .map = map_values.toOwnedSlice() }, start);
+                    try self.pushValue(
+                        &values,
+                        preimp.KeyVal.toMap(map_values.toOwnedSlice(), .{}).inner,
+                        start,
+                    );
                 }
             },
             .start_tag => {

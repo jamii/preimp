@@ -52,7 +52,7 @@ pub const ValueInner = union(ValueTag) {
                         .val = try ValueInner.fromZig(allocator, @field(zig_value, field.name)),
                     });
                 }
-                return ValueInner{ .map = map_values.toOwnedSlice() };
+                return KeyVal.toMap(map_values.toOwnedSlice()).inner;
             },
             .Enum => |info| {
                 inline for (info.fields) |field| {
@@ -435,6 +435,13 @@ pub const KeyVal = struct {
             .NotFound => return key_vals,
         }
     }
+
+    pub fn toMap(key_vals: []KeyVal, options: struct { is_sorted: bool = false }) Value {
+        if (!options.is_sorted)
+            u.deepSort(key_vals);
+        // TODO check for duplicate keys
+        return Value.fromInner(.{ .map = key_vals });
+    }
 };
 
 pub const Tagged = struct {
@@ -457,6 +464,8 @@ pub const Builtin = enum {
     do,
     map,
     filter,
+    @"map->vec",
+    @"vec->map",
 };
 
 pub const Fun = struct {

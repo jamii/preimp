@@ -458,6 +458,56 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                                 }
                                 return preimp.Value.fromInner(.{ .vec = new_vec.toOwnedSlice() });
                             },
+                            .@"map->vec" => {
+                                if (tail.items.len != 1)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                    , .{ 1, tail.items.len });
+
+                                const map = tail.items[0];
+                                if (map.inner != .map)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected map in map->vec, got:" ?
+                                    , .{map});
+
+                                var vec = try self.allocator.alloc(preimp.Value, map.inner.map.len);
+                                for (vec) |*elem, i| {
+                                    const key_val = map.inner.map[i];
+                                    elem.* = preimp.Value.fromInner(.{
+                                        .vec = try self.allocator.dupe(preimp.Value, &.{
+                                            key_val.key,
+                                            key_val.val,
+                                        }),
+                                    });
+                                }
+                                return preimp.Value.fromInner(.{ .vec = vec });
+                            },
+                            .@"vec->map" => {
+                                if (tail.items.len != 1)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                    , .{ 1, tail.items.len });
+
+                                const vec = tail.items[0];
+                                if (vec.inner != .vec)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected vec in vec->map, got:" ?
+                                    , .{vec});
+
+                                var map = try self.allocator.alloc(preimp.KeyVal, vec.inner.vec.len);
+                                for (map) |*key_val, i| {
+                                    const elem = vec.inner.vec[i];
+                                    if (elem.inner != .vec or elem.inner.vec.len != 2)
+                                        return preimp.Value.format(self.allocator,
+                                            \\ #"error" #"expected [key val] in vec->map, got:" ?
+                                        , .{elem});
+                                    key_val.* = .{
+                                        .key = elem.inner.vec[0],
+                                        .val = elem.inner.vec[1],
+                                    };
+                                }
+                                return preimp.KeyVal.toMap(map, .{});
+                            },
                         }
                     },
                     .fun => |fun| {
@@ -484,9 +534,7 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                 const val = try self.evalExpr(key_val.val);
                 try body.append(.{ .key = key, .val = val });
             }
-            u.deepSort(body.items);
-            // TODO check no duplicate values
-            return preimp.Value.fromInner(.{ .map = body.toOwnedSlice() });
+            return preimp.KeyVal.toMap(body.toOwnedSlice(), .{});
         },
         .tagged => |tagged| {
             const key = try self.evalExpr(tagged.key.*);
