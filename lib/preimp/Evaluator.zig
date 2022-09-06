@@ -506,7 +506,7 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                                         .val = elem.inner.vec[1],
                                     };
                                 }
-                                return preimp.KeyVal.toMap(map, .{});
+                                return preimp.KeyVal.toMap(self.allocator, map, .{});
                             },
                         }
                     },
@@ -534,7 +534,7 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                 const val = try self.evalExpr(key_val.val);
                 try body.append(.{ .key = key, .val = val });
             }
-            return preimp.KeyVal.toMap(body.toOwnedSlice(), .{});
+            return preimp.KeyVal.toMap(self.allocator, body.toOwnedSlice(), .{});
         },
         .tagged => |tagged| {
             const key = try self.evalExpr(tagged.key.*);

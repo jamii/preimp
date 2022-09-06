@@ -436,10 +436,14 @@ pub const KeyVal = struct {
         }
     }
 
-    pub fn toMap(key_vals: []KeyVal, options: struct { is_sorted: bool = false }) Value {
+    pub fn toMap(allocator: u.Allocator, key_vals: []KeyVal, options: struct { is_sorted: bool = false }) !Value {
         if (!options.is_sorted)
             u.deepSort(key_vals);
-        // TODO check for duplicate keys
+        for (key_vals) |_, i|
+            if (i != 0 and u.deepEqual(key_vals[i - 1].key, key_vals[i].key))
+                return Value.format(allocator,
+                    \\ #"error" #"duplicate key in map" ?
+                , .{key_vals[i].key});
         return Value.fromInner(.{ .map = key_vals });
     }
 };

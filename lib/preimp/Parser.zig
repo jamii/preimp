@@ -115,7 +115,7 @@ pub fn parseExprs(self: *Parser, max_exprs_o: ?usize, closing_token: preimp.Toke
                     }
                     try self.pushValue(
                         &values,
-                        preimp.KeyVal.toMap(map_values.toOwnedSlice(), .{}).inner,
+                        (try preimp.KeyVal.toMap(self.allocator, map_values.toOwnedSlice(), .{})).inner,
                         start,
                     );
                 }
