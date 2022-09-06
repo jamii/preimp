@@ -319,10 +319,6 @@ false
 (get-meta "foo")
 ---
 {
-    "start token ix"
-    3
-    "end token ix"
-    4
     "origin"
     [
         0
@@ -377,10 +373,6 @@ false
 (get-meta (get (get foo "a") 0))
 ---
 {
-    "start token ix"
-    9
-    "end token ix"
-    10
     "origin"
     [
         0
@@ -417,10 +409,6 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
-    "start token ix"
-    8
-    "end token ix"
-    9
     "origin"
     [
         0
@@ -434,10 +422,6 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
-    "start token ix"
-    8
-    "end token ix"
-    9
     "origin"
     [
         0
@@ -451,10 +435,6 @@ false
 (get-meta (get (get foo "a") 1))
 ---
 {
-    "start token ix"
-    13
-    "end token ix"
-    14
     "origin"
     [
         0
@@ -609,3 +589,63 @@ false
     #
         "everything inside do must be an action"
         42
+
+(map [1 2 3] (fn [x] (+ x 1)))
+---
+[
+    2
+    3
+    4
+]
+
+(map {1 2 3 4} (fn [x] (+ x 1)))
+---
+#
+    "error"
+    #
+        "expected vec in map, got:"
+        {
+            1
+            2
+            3
+            4
+        }
+
+(map [1 2 3] [(fn [x] (+ x 1))])
+---
+#
+    "error"
+    #
+        "expected fun in map, got:"
+        [
+            <fn>
+        ]
+
+(filter [1 2 3] (fn [x] (= x 1)))
+---
+[
+    1
+]
+
+(filter {1 2 3 4} (fn [x] (= x 1)))
+---
+#
+    "error"
+    #
+        "expected vec in filter, got:"
+        {
+            1
+            2
+            3
+            4
+        }
+
+(filter [1 2 3] [(fn [x] (= x 1))])
+---
+#
+    "error"
+    #
+        "expected fun in filter, got:"
+        [
+            <fn>
+        ]

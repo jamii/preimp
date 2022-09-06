@@ -404,20 +404,64 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
                                 }
                                 return preimp.Value.fromInner(.{ .actions = actions.toOwnedSlice() });
                             },
+                            .map => {
+                                if (tail.items.len != 2)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                    , .{ 2, tail.items.len });
+
+                                const vec = tail.items[0];
+                                if (vec.inner != .vec)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected vec in map, got:" ?
+                                    , .{vec});
+
+                                const fun = tail.items[1];
+                                if (fun.inner != .fun)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected fun in map, got:" ?
+                                    , .{fun});
+
+                                const new_vec = try self.allocator.alloc(preimp.Value, vec.inner.vec.len);
+                                for (new_vec) |*new_elem, i|
+                                    new_elem.* = try self.apply(fun.inner.fun, vec.inner.vec[i .. i + 1]);
+                                return preimp.Value.fromInner(.{ .vec = new_vec });
+                            },
+                            .filter => {
+                                if (tail.items.len != 2)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+                                    , .{ 2, tail.items.len });
+
+                                const vec = tail.items[0];
+                                if (vec.inner != .vec)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected vec in filter, got:" ?
+                                    , .{vec});
+
+                                const fun = tail.items[1];
+                                if (fun.inner != .fun)
+                                    return preimp.Value.format(self.allocator,
+                                        \\ #"error" #"expected fun in filter, got:" ?
+                                    , .{fun});
+
+                                var new_vec = u.ArrayList(preimp.Value).init(self.allocator);
+                                for (vec.inner.vec) |old_elem| {
+                                    const keep = try self.apply(fun.inner.fun, &.{old_elem});
+                                    switch (keep.inner) {
+                                        .@"false" => {},
+                                        .@"true" => try new_vec.append(old_elem),
+                                        else => return preimp.Value.format(self.allocator,
+                                            \\ #"error" #"expected filter fun to return bool, got:" ?
+                                        , .{keep}),
+                                    }
+                                }
+                                return preimp.Value.fromInner(.{ .vec = new_vec.toOwnedSlice() });
+                            },
                         }
                     },
                     .fun => |fun| {
-                        // apply
-                        const fn_env_start = self.env.items.len;
-                        defer self.env.shrinkRetainingCapacity(fn_env_start);
-                        try self.env.appendSlice(fun.env);
-                        if (fun.args.len != tail.items.len)
-                            return preimp.Value.format(self.allocator,
-                                \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
-                            , .{ fun.args.len, tail.items.len });
-                        for (fun.args) |arg, i|
-                            try self.env.append(.{ .name = arg, .value = tail.items[i] });
-                        return self.evalExprs(fun.body);
+                        return self.apply(fun, tail.items);
                     },
                     else => {
                         return preimp.Value.format(self.allocator,
@@ -453,4 +497,17 @@ pub fn evalExprWithoutOrigin(self: *Evaluator, expr: preimp.Value) error{OutOfMe
             } });
         },
     }
+}
+
+fn apply(self: *Evaluator, fun: preimp.Fun, tail: []const preimp.Value) !preimp.Value {
+    const fn_env_start = self.env.items.len;
+    defer self.env.shrinkRetainingCapacity(fn_env_start);
+    try self.env.appendSlice(fun.env);
+    if (fun.args.len != tail.len)
+        return preimp.Value.format(self.allocator,
+            \\ #"error" #"wrong number of args" {"expected" ? "found" ?}
+        , .{ fun.args.len, tail.len });
+    for (fun.args) |arg, i|
+        try self.env.append(.{ .name = arg, .value = tail[i] });
+    return self.evalExprs(fun.body);
 }

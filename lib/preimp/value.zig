@@ -192,7 +192,7 @@ pub const ValueInner = union(ValueTag) {
                     try writer.writeAll("[");
                     try writer.writeAll("\n");
                     for (action.origin) |elem| {
-                        try writer.writeByteNTimes(' ', indent + 8);
+                        try writer.writeByteNTimes(' ', indent + 12);
                         try std.fmt.format(writer, "{d}", .{elem});
                         try writer.writeAll("\n");
                     }
@@ -455,6 +455,8 @@ pub const Builtin = enum {
     count,
     @"put!",
     do,
+    map,
+    filter,
 };
 
 pub const Fun = struct {
