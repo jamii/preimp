@@ -77,7 +77,10 @@ pub fn main() !void {
         .selection = null,
         .stdlib = stdlib: {
             var parser = try preimp.Parser.init(allocator, preimp.stdlib);
-            break :stdlib try parser.parseExprs(null, .eof);
+            const exprs = try parser.parseExprs(null, .eof);
+            var evaluator = preimp.Evaluator.init(allocator);
+            _ = try evaluator.evalExprsKeepEnv(exprs);
+            break :stdlib evaluator.env.toOwnedSlice();
         },
         .input = try allocator.dupe(preimp.Value, &[1]preimp.Value{preimp.Value.fromInner(.nil)}),
         .output_arena = u.ArenaAllocator.init(allocator),
@@ -187,8 +190,7 @@ pub fn main() !void {
 
 const State = struct {
     selection: ?Selection,
-    // TODO maybe store pre-evaluated env instead?
-    stdlib: []preimp.Value,
+    stdlib: []preimp.Binding,
     input: []preimp.Value,
     output_arena: u.ArenaAllocator,
     output: preimp.Value,
@@ -804,11 +806,11 @@ fn evaluate(state: *State) !void {
         defer _ = origin.pop();
         _ = try expr.setOriginRecursively(allocator, &origin);
     }
-    // TODO memory management lol
+    // TODO memory management
     //state.output_arena.deinit();
     //state.output_arena = u.ArenaAllocator.init(allocator);
     var evaluator = preimp.Evaluator.init(state.output_arena.allocator());
-    _ = try evaluator.evalExprsKeepEnv(state.stdlib);
+    try evaluator.env.appendSlice(state.stdlib);
     state.output = try evaluator.evalExprs(state.input);
 
     reportTime(.{ .eval_time_ms = @intToFloat(f64, timer.lap()) / 1E6 });
