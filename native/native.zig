@@ -357,8 +357,6 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
             OpenBrace("{");
             defer CloseBrace("}");
             for (map) |key_val, i| {
-                if (i != 0)
-                    ig.NewLine();
                 try pathPush(path, i);
                 defer pathPop(path);
                 {
@@ -366,6 +364,7 @@ fn drawValue(state: *State, value: preimp.Value, path: *u.ArrayList(usize), inte
                     defer pathPop(path);
                     try drawValue(state, key_val.key, path, interaction);
                 }
+                ig.SameLine();
                 {
                     try pathPush(path, 1);
                     defer pathPop(path);
